@@ -1,0 +1,17 @@
+<label class="field-row">
+  <input type="radio" name="mode" value="per-page" checked />
+  Per page (one file per page)
+</label>
+<label class="field-row">
+  <input type="radio" name="mode" value="by-ranges" />
+  By page ranges
+</label>
+<label class="field-row">
+  <span>Ranges (used in "by ranges" mode, e.g. 1-5, 7, 10-12):</span>
+  <input type="text" name="ranges" value="" />
+</label>
+<label class="field-row">
+  <span>Output prefix:</span>
+  <input type="text" name="prefix" value="" placeholder="defaults to <basename>-" />
+</label>
+<input type="hidden" name="totalPages" value="0" />

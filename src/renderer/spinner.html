@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Working…</title>
+  <link rel="stylesheet" href="./spinner.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="spinner"></div>
+    <div class="label" id="label">Working…</div>
+  </div>
+  <script>
+    // Allow main to pass a label via ?label= for future plugins.
+    const params = new URLSearchParams(window.location.search);
+    const label = params.get('label');
+    if (label) document.getElementById('label').textContent = label;
+  </script>
+</body>
+</html>

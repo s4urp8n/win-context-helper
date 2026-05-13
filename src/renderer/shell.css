@@ -1,0 +1,303 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: #fafafa;
+  color: #222;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Body grows to fit content; the renderer reports documentElement.scrollHeight
+   to main which resizes the window via setContentSize. */
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.titlebar {
+  height: 30px;
+  flex: 0 0 auto;
+  background: #f3f3f3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  -webkit-app-region: drag;
+  user-select: none;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.titlebar .title {
+  font-size: 12px;
+  color: #555;
+  padding-left: 12px;
+  font-weight: 500;
+}
+
+.titlebar .controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+  height: 100%;
+}
+
+.titlebar .ctrl {
+  width: 40px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  padding: 0;
+  min-width: unset;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.titlebar .ctrl:hover {
+  background: #e5e5e5;
+}
+
+.titlebar .ctrl-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+#app {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px;
+  box-sizing: border-box;
+}
+
+.state {
+  display: none;
+}
+
+#app[data-state="scanning"] .state[data-state="scanning"],
+#app[data-state="info"]     .state[data-state="info"],
+#app[data-state="confirm"]  .state[data-state="confirm"],
+#app[data-state="running"]  .state[data-state="running"],
+#app[data-state="error"]    .state[data-state="error"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+
+.row { display: flex; align-items: center; gap: 14px; }
+
+.spinner-row {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 0;
+}
+
+.spinner-row .label {
+  font-size: 14px;
+}
+
+.icon-row {
+  flex: 0 0 auto;
+  align-items: flex-start;
+}
+
+.icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 18px;
+  color: #fff;
+  margin-top: 2px;
+}
+
+.icon-info { background: #1971c2; }
+.icon-question { background: #1971c2; }
+.icon-error { background: #d63939; }
+
+.message { font-size: 14px; font-weight: 600; line-height: 1.35; padding-top: 4px; }
+
+.detail {
+  margin: 12px 0 16px 0;
+  padding: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: #333;
+  flex: 0 1 auto;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.detail:empty {
+  display: none;
+}
+
+.buttons {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border: 1px solid #c5c5c5;
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 80px;
+}
+
+button:hover { background: #f0f0f0; }
+
+button.primary {
+  background: #1971c2;
+  color: #fff;
+  border-color: #1971c2;
+}
+
+button.primary:hover { background: #1864a8; }
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #d0d0d0;
+  border-top-color: #1971c2;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#app[data-state="scanning"] .state[data-state="scanning"],
+#app[data-state="running"]  .state[data-state="running"] {
+  justify-content: center;
+}
+
+.progress-info {
+  margin-top: 16px;
+  flex: 0 0 auto;
+}
+.progress-text {
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+}
+.progress-bar {
+  height: 6px;
+  background: #e5e5e5;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #1971c2;
+  border-radius: 3px;
+  transition: width 0.15s ease-out;
+}
+
+/* When a progress bar is present (running state with real progress data),
+   hide the spinner — the moving bar already conveys activity. */
+.state.has-progress .spinner-row .spinner {
+  display: none;
+}
+.state.has-progress .progress-info {
+  margin-top: 0;
+}
+
+#app[data-state="form"] .state[data-state="form"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+
+.form-summary {
+  font-size: 12px;
+  color: #666;
+  margin: 8px 0 12px 0;
+  flex: 0 1 auto;
+  white-space: pre-wrap;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+  word-break: break-word;
+}
+
+.form-fields {
+  flex: 0 1 auto;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.form-fields label {
+  display: block;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.form-fields .field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.form-fields input[type="text"],
+.form-fields input[type="number"],
+.form-fields select,
+.form-fields textarea {
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  border: 1px solid #c5c5c5;
+  border-radius: 3px;
+  box-sizing: border-box;
+  background: #fff;
+  color: #222;
+}
+
+.form-fields input[type="checkbox"],
+.form-fields input[type="radio"] {
+  margin-right: 6px;
+}
+
+.form-fields .ext-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.form-fields .ext-row .ext-name {
+  flex: 0 0 auto;
+  font-family: "Consolas", monospace;
+}
+
+.form-fields .ext-row .ext-info {
+  color: #888;
+  font-size: 11px;
+}

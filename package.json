@@ -1,0 +1,21 @@
+{
+  "name": "context-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin-based right-click context menu utility for Windows Explorer",
+  "author": "ContextHelper",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node tests/smoke/runner.js",
+    "gen-register": "node scripts/gen-register-bat.js",
+    "package": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "vitest": "^2.1.0"
+  }
+}

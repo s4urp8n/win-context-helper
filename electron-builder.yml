@@ -1,0 +1,22 @@
+appId: dev.contexthelper.app
+productName: ContextHelper
+directories:
+  output: dist
+files:
+  - "src/**/*"
+  - "plugins/**/*"
+  - "package.json"
+extraResources:
+  - from: scripts/gen-register-bat.js
+    to: scripts/gen-register-bat.js
+  - from: plugins
+    to: plugins
+  - from: resources/bin
+    to: bin
+    filter:
+      - '**/*'
+win:
+  target:
+    - target: dir
+      arch: x64
+  icon: null

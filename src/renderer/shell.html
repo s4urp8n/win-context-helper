@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ContextHelper</title>
+  <link rel="stylesheet" href="./shell.css" />
+</head>
+<body>
+  <header class="titlebar">
+    <div class="title">ContextHelper</div>
+    <div class="controls">
+      <button class="ctrl ctrl-min" id="ctrl-min" title="Minimize" aria-label="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1"/></svg>
+      </button>
+      <button class="ctrl ctrl-close" id="ctrl-close" title="Close" aria-label="Close">
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" stroke-width="1"/>
+          <line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" stroke-width="1"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+  <div id="app">
+    <section data-state="scanning" class="state">
+      <div class="row spinner-row">
+        <div class="spinner"></div>
+        <div class="label" id="scanning-label">Working…</div>
+      </div>
+      <div class="progress-info" id="scanning-progress" style="display:none;">
+        <div class="progress-text" id="scanning-progress-text"></div>
+      </div>
+    </section>
+
+    <section data-state="form" class="state">
+      <div class="row icon-row">
+        <div class="icon icon-question">?</div>
+        <div class="message" id="form-message"></div>
+      </div>
+      <div class="form-summary" id="form-summary"></div>
+      <form class="form-fields" id="form-fields" autocomplete="off"></form>
+      <div class="buttons">
+        <button class="primary" data-action="start">Start</button>
+        <button data-action="cancel">Cancel</button>
+      </div>
+    </section>
+
+    <section data-state="info" class="state">
+      <div class="row icon-row">
+        <div class="icon icon-info">i</div>
+        <div class="message" id="info-message"></div>
+      </div>
+      <pre class="detail" id="info-detail"></pre>
+      <div class="buttons"><button class="primary" data-action="ok">OK</button></div>
+    </section>
+
+    <section data-state="confirm" class="state">
+      <div class="row icon-row">
+        <div class="icon icon-question">?</div>
+        <div class="message" id="confirm-message"></div>
+      </div>
+      <pre class="detail" id="confirm-detail"></pre>
+      <div class="buttons">
+        <button class="primary" data-action="continue">Continue</button>
+        <button data-action="cancel">Cancel</button>
+      </div>
+    </section>
+
+    <section data-state="running" class="state">
+      <div class="row spinner-row">
+        <div class="spinner"></div>
+        <div class="label" id="running-label">Working…</div>
+      </div>
+      <div class="progress-info" id="running-progress" style="display:none;">
+        <div class="progress-bar"><div class="progress-fill" id="running-progress-fill"></div></div>
+        <div class="progress-text" id="running-progress-text"></div>
+      </div>
+    </section>
+
+    <section data-state="error" class="state">
+      <div class="row icon-row">
+        <div class="icon icon-error">!</div>
+        <div class="message" id="error-message"></div>
+      </div>
+      <pre class="detail" id="error-detail"></pre>
+      <div class="buttons"><button class="primary" data-action="ok">OK</button></div>
+    </section>
+  </div>
+  <script src="./shell.js"></script>
+</body>
+</html>

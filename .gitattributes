@@ -1,0 +1,11 @@
+# Vendored binaries + packaged build are stored via Git LFS.
+# Covers resources/bin/ (build inputs) and dist/win-unpacked/ (the live build).
+# Requires `git lfs install` on every machine that clones this repo —
+# without it these paths check out as text pointer files, not real binaries.
+
+*.exe  filter=lfs diff=lfs merge=lfs -text
+*.dll  filter=lfs diff=lfs merge=lfs -text
+*.pak  filter=lfs diff=lfs merge=lfs -text
+*.dat  filter=lfs diff=lfs merge=lfs -text
+*.bin  filter=lfs diff=lfs merge=lfs -text
+*.asar filter=lfs diff=lfs merge=lfs -text
