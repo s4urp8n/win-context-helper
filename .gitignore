@@ -13,3 +13,4 @@ Thumbs.db
 
 # Bundled external tools and the packaged build are now vendored via Git LFS.
 # See .gitattributes. Previously ignored: dist/ and resources/bin/.
+/RESUME.md
