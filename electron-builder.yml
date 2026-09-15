@@ -1,5 +1,8 @@
 appId: dev.contexthelper.app
 productName: ContextHelper
+# No auto-update: without this electron-builder infers GitHub publishing from the git remote
+# and writes latest.yml / app-update.yml.
+publish: null
 directories:
   output: dist
 files:
@@ -7,8 +10,6 @@ files:
   - "plugins/**/*"
   - "package.json"
 extraResources:
-  - from: scripts/gen-register-bat.js
-    to: scripts/gen-register-bat.js
   - from: plugins
     to: plugins
   - from: resources/bin
@@ -17,6 +18,15 @@ extraResources:
       - '**/*'
 win:
   target:
-    - target: dir
+    - target: nsis
       arch: x64
   icon: null
+nsis:
+  oneClick: true
+  perMachine: false
+  runAfterFinish: false
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: ContextHelper
+  artifactName: ContextHelper-Setup-${version}.${ext}
+  include: build/installer.nsh

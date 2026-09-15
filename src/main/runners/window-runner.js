@@ -147,4 +147,4 @@ function readUiHtmlFromDisk(pluginDir) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
 }
 
-module.exports = { runWindowPlugin, readUiHtmlFromDisk };
+module.exports = { runWindowPlugin, readUiHtmlFromDisk, makeShellController };

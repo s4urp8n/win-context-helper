@@ -11,6 +11,7 @@ module.exports = {
       thresholds: {
         'plugins/flatten-folder/**': FULL,
         'plugins/flatten-folder-keep-order/**': FULL,
+        'src/main/shell-menu/**': FULL,
       },
     },
   },

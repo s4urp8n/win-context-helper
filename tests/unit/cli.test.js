@@ -41,4 +41,14 @@ describe('parseCli', () => {
   it('returns kind:none when argv is empty', () => {
     expect(parseCli([])).toEqual({ kind: 'none' });
   });
+
+  it('parses --register and --unregister', () => {
+    expect(parseCli(['--register'])).toEqual({ kind: 'register' });
+    expect(parseCli(['--unregister'])).toEqual({ kind: 'unregister' });
+  });
+
+  it('rejects --register or --unregister combined with other arguments', () => {
+    expect(() => parseCli(['--register', '--action=x'])).toThrow(/--register cannot be combined/);
+    expect(() => parseCli(['--action=x', 'C:\\A', '--unregister'])).toThrow(/--unregister cannot be combined/);
+  });
 });

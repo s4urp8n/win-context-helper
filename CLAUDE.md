@@ -2,6 +2,8 @@
 
 ## Resume here (last touched 2026-05-19)
 
+**2026-09-15 update (read first):** distribution moved to an NSIS installer (`dist/ContextHelper-Setup-<version>.exe`, one-click, per user) and the app now owns its Explorer registration: `ContextHelper.exe --register` / `--unregister`, a background repair on every packaged menu click, and a status window when launched without arguments (Start-menu shortcut). `register.bat`, `scripts/gen-register-bat.js` and `src/main/registry/menu-tree.js` are gone; the menu is flat (no Folders/Files split). Spec: `docs/superpowers/specs/2026-09-15-installer-design.md`; plan: `docs/superpowers/plans/2026-09-15-installer.md`. The notes below are historical.
+
 **Where we are:** Dispatcher refactor complete and verified end-to-end (2026-05-19). 150/150 unit tests + smoke green. Architecture changed from scattered `index.js + plugin-registry + dialog-flow + window-manager` into:
 
 ```
@@ -9,7 +11,8 @@ src/main/
   index.js                       ← ~55 lines: app.whenReady → dispatcher.dispatch → app.exit
   dispatcher.js                  ← single orchestration point
   selection/{classify,validate}.js  ← pure target classification + accepts/min/max validation
-  registry/{plugin-loader,menu-tree}.js  ← class-loading + Folders/Files grouping
+  registry/plugin-loader.js  ← class-loading + manifest validation
+  shell-menu/{entries,reg-file,reg,sync,status-view}.js  ← self-managed Explorer registration (2026-09-15)
   runners/{safe-hook,base-runner,dialog-runner,window-runner}.js  ← strategy-based
 src/shared/base-plugin.js        ← class contract + default hooks
 ```
@@ -114,8 +117,8 @@ Electron app that adds a plugin-driven right-click submenu to Windows Explorer. 
 | `npm run test:watch` | Vitest watch mode. |
 | `npm run smoke` | Run all plugin workers programmatically against synthetic fixtures (no Electron). `--plugin=<id>` filters. |
 | `npm start -- --action=<id> --target="<path>"` | Launch the app in dev mode for one plugin. |
-| `npm run package` | electron-builder `dir` target → `dist/win-unpacked/`. |
-| `npm run gen-register` | Generate `register.bat` / `unregister.bat` from plugin manifests. |
+| `npm run test:coverage` | Vitest with coverage; the flatten plugins and `src/main/shell-menu` must stay at 100%. |
+| `npm run package` | electron-builder → `dist/win-unpacked/` + `dist/ContextHelper-Setup-<version>.exe` (NSIS, one-click, per user). |
 
 ## Architecture cheat sheet
 
@@ -128,19 +131,16 @@ Electron app that adds a plugin-driven right-click submenu to Windows Explorer. 
 - **Renderer** (`src/renderer/`) is a single HTML shell. Plugin `ui.html` is injected into `#options-slot`. Form values (keyed by `name`) become the worker's `options` object.
 - **IPC channels** declared in `src/shared/plugin-api.js`. Renderer talks only through the preload bridge (`src/preload/plugin-preload.js`).
 - **Named pipe aggregator** (`src/main/named-pipe.js`) exists and is unit-tested but not wired in yet. Plan 3 turns it on for the first `maxSelection > 1` plugin.
-- **Registry layout (cascading submenu):** the root verb under `HKCU\Software\Classes\Directory\shell\ContextHelper` carries `MUIVerb`, `Icon`, and `ExtendedSubCommandsKey="Directory\ContextHelperSub"` (path is HKCR-relative, NOT HKCU-relative). Per-plugin entries live at `HKCU\Software\Classes\Directory\ContextHelperSub\shell\<plugin-id>` with their own `MUIVerb` and `command` subkey. Do NOT also write `SubCommands` — an empty `SubCommands` string overrides `ExtendedSubCommandsKey` and produces an empty submenu. Same pattern for per-extension keys under `SystemFileAssociations\.<ext>\...`. See `scripts/gen-register-bat.js`.
-- **Multi-select handling:** `register.bat` writes `MultiSelectModel="Player"` for every plugin verb. Windows ignores this on `ExtendedSubCommandsKey` cascaded items and runs Document mode (one invocation per selected item). We quote `%V` in the command (`"%V"`) so paths with spaces stay intact; the named-pipe aggregator (`src/main/named-pipe.js`) merges concurrent single-target invocations within a 250 ms window. **Selection size limit:** Windows hides static-verb context-menu items at ~15 selected items. This is a shell-side cap on registry-based verbs and is not raisable without a COM `IExplorerCommand` extension (out of scope). Document the limit; users batch larger jobs.
+- **Registry layout (cascading submenu):** the root verb under `HKCU\Software\Classes\Directory\shell\ContextHelper` carries `MUIVerb`, `Icon`, and `ExtendedSubCommandsKey="Directory\ContextHelperSub"` (path is HKCR-relative, NOT HKCU-relative). Per-plugin entries live at `HKCU\Software\Classes\Directory\ContextHelperSub\shell\<plugin-id>` with their own `MUIVerb` and `command` subkey. Do NOT also write `SubCommands` — an empty `SubCommands` string overrides `ExtendedSubCommandsKey` and produces an empty submenu. Same pattern for per-extension keys under `SystemFileAssociations\.<ext>\...`. The app owns these keys: `src/main/shell-menu/` (`entries.js` → desired state, `sync.js` → diff / repair / verify through `reg export` + `reg import` of UTF-16 `.reg` files; console output of `reg.exe` is OEM-encoded and never parsed). `ContextHelper.exe --register` / `--unregister`; the installer runs `--register`; every packaged menu click re-syncs in the background (leader only, ≤5 s); launching without arguments opens a status window. `register.bat` and `gen-register-bat.js` no longer exist.
+- **Multi-select handling:** The menu registration (`src/main/shell-menu/entries.js`) writes `MultiSelectModel="Player"` for every plugin verb. Windows ignores this on `ExtendedSubCommandsKey` cascaded items and runs Document mode (one invocation per selected item). We quote `%V` in the command (`"%V"`) so paths with spaces stay intact; the named-pipe aggregator (`src/main/named-pipe.js`) merges concurrent single-target invocations within a 250 ms window. **Selection size limit:** Windows hides static-verb context-menu items at ~15 selected items. This is a shell-side cap on registry-based verbs and is not raisable without a COM `IExplorerCommand` extension (out of scope). Document the limit; users batch larger jobs.
 - **Vitest in CJS:** the project uses `globals: true` in `vitest.config.js`. Test files do NOT `require('vitest')`; `describe`/`it`/`expect`/`beforeEach`/`afterEach` are global.
 
 ## Adding a new plugin
 
-1. `mkdir plugins/<id>`
-2. Create `manifest.json` (required fields: `id`, `label`, `description`, `accepts`, `minSelection`, `maxSelection`).
-3. Create `ui.html` (optional form; values keyed by `name` attribute become `options`).
-4. Create `worker.js` exporting the standard async run signature.
-5. Add a unit test under `tests/unit/<id>.test.js`.
-6. Add a smoke case to `tests/smoke/runner.js`.
-7. Run `npm run gen-register` to refresh the .bat files. Re-run `register.bat` to update Explorer keys.
+1. `mkdir plugins/<id>` and create `plugin.js` exporting `class extends BasePlugin` with `static get manifest()` (`id`, `label`, `description`, `accepts`, `minSelection`, `maxSelection`, `ui`), `preflight()` and `run()`.
+2. Optional `ui.html` (window mode) — form values keyed by `name` become `options`.
+3. Add a unit test under `tests/unit/<id>.test.js` and a smoke case to `tests/smoke/runner.js`.
+4. `npm run package`, then install the new Setup (or run `ContextHelper.exe --register`) to add the menu item.
 
 ## Conventions
 
@@ -154,7 +154,7 @@ Electron app that adds a plugin-driven right-click submenu to Windows Explorer. 
 
 - [ ] `npm test` green
 - [ ] `npm run smoke` green
-- [ ] If you changed manifests: `npm run gen-register` and re-test `register.bat` in Explorer.
+- [ ] If you changed manifests: `npm run package`, install the Setup (or `--register`) and check the menu in Explorer.
 
 ## Where the bundled binaries will live (Plan 3)
 

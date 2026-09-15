@@ -11,8 +11,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "node tests/smoke/runner.js",
-    "gen-register": "node scripts/gen-register-bat.js",
-    "package": "electron-builder --dir"
+    "package": "electron-builder --win"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.9",

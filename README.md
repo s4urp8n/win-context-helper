@@ -59,41 +59,44 @@ Plugins that combine several inputs into one output (Concatenate video, Images t
 
 ## Install
 
-The repository stores the bundled tools and a ready-to-use build in **Git LFS**. Install LFS before cloning, otherwise `.exe`/`.dll`/`.asar` files check out as text pointers:
+Run `dist\ContextHelper-Setup-<version>.exe`. It installs for the current user into `%LOCALAPPDATA%\Programs\context-helper` without admin rights, registers the Explorer menu and adds a **ContextHelper** shortcut to the Start menu. The installer is not code-signed, so SmartScreen may ask for confirmation (**More info → Run anyway**).
+
+Open **ContextHelper** from the Start menu to check the menu: it repairs missing or outdated entries and shows what it changed. Every menu click also re-checks the registration in the background.
+
+Uninstall from **Settings → Apps → ContextHelper**. Running a newer Setup updates the app in place.
+
+The installer, the build and the bundled tools are stored in **Git LFS**. Install LFS before cloning, otherwise `.exe`/`.dll`/`.asar` files check out as text pointers:
 
 ```
 git lfs install
 git clone https://github.com/s4urp8n/win-context-helper.git
 ```
 
-Then double-click `dist\win-unpacked\register.bat`. To remove the menu, run `dist\win-unpacked\unregister.bat`.
-
-`register.bat` writes the absolute path of `ContextHelper.exe` into the registry, so re-run it after moving the folder or rebuilding into a different location.
+**Portable use:** copy `dist\win-unpacked` anywhere and run `ContextHelper.exe --register` there; `ContextHelper.exe --unregister` removes the menu.
 
 ## Development
 
 ```
 npm install
 npm test                          # Vitest unit tests
-npm run test:coverage             # same with coverage; the flatten plugins must stay at 100%
+npm run test:coverage             # same with coverage; the flatten plugins and src/main/shell-menu must stay at 100%
 npm run smoke                     # runs plugins against synthetic fixtures, no Electron
 npm start -- --action=flatten-folder --target="C:\path\to\folder"
 ```
 
 `--target` can be repeated (positional paths work too) to simulate a multi-selection.
 
-Exit codes: `0` success, cancel or nothing to do · `1` finished with per-item errors · `2` selection rejected · `3` internal error (including malformed CLI flags) · `4` unknown action or plugin load failure.
+Exit codes: `0` success, cancel or nothing to do · `1` finished with per-item errors · `2` selection rejected · `3` internal error (including malformed CLI flags) · `4` unknown action or plugin load failure, or `--register` / `--unregister` outside the packaged build · `5` the Explorer menu could not be registered or verified.
+
+`--register`, `--unregister`, the Start-menu status window and the background menu check run only in the packaged app, so `npm start` never repoints the real menu at the development Electron binary.
 
 ## Build
 
 ```
-npm run package                   # electron-builder → dist/win-unpacked/
-npm run gen-register              # regenerates register.bat / unregister.bat in the repo root
-copy register.bat dist\win-unpacked\
-copy unregister.bat dist\win-unpacked\
+npm run package                   # electron-builder → dist/win-unpacked/ + dist/ContextHelper-Setup-<version>.exe
 ```
 
-`gen-register` defaults to `%~dp0ContextHelper.exe` (the .bat must sit next to the exe); pass `-- --exe="C:\full\path\ContextHelper.exe"` to hard-code a path.
+Bump `version` in `package.json` before building a release — the installer file name follows it.
 
 > **`npm run package` caveat:** electron-builder fetches `winCodeSign-2.6.0.7z`, which contains macOS symlinks that Windows extracts only with admin rights or Developer Mode. If you hit `Cannot create symbolic link : A required privilege is not held by the client`, enable Developer Mode (Settings → System → For developers) or pre-populate `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\` with an extracted copy (`7za x <archive>.7z -o<dir> -xr!darwin`).
 
@@ -104,7 +107,8 @@ src/main/index.js              Electron entry: app.whenReady → dispatch → ap
 src/main/dispatcher.js         CLI → load plugins → merge multi-select → classify → validate → runner
 src/main/named-pipe.js         leader/follower aggregation of per-item Explorer launches
 src/main/selection/            classify (folders / files / missing), validate (accepts, min/max)
-src/main/registry/             plugin-loader (manifest checks), menu-tree (flat menu order)
+src/main/registry/             plugin-loader (manifest checks)
+src/main/shell-menu/           writes, verifies and repairs the Explorer menu in HKCU via reg.exe
 src/main/runners/              dialog-runner (scan → confirm → run), window-runner (scan → form → run)
 src/main/worker-runner.js      forks src/worker/worker-shim.js, which runs preflight()/run() off the UI process
 src/renderer/shell.*           the single state-machine window; src/preload/shell-preload.js bridges IPC
@@ -112,7 +116,7 @@ src/shared/base-plugin.js      plugin base class with default hooks
 src/shared/spawn.js            spawnTool(): runs a bundled exe, collects output, parses progress
 plugins/<id>/plugin.js         one class per plugin (+ optional ui.html, icon.png)
 resources/bin/                 bundled tools, copied to resources/bin in the build
-scripts/gen-register-bat.js    generates register.bat / unregister.bat from plugin manifests
+build/installer.nsh            NSIS hooks: --register after install, key cleanup on uninstall
 ```
 
 ## Adding a plugin
@@ -153,7 +157,7 @@ scripts/gen-register-bat.js    generates register.bat / unregister.bat from plug
 
 4. **External tools:** build the path from `ctx.binDir` (e.g. `path.join(binDir, 'ffmpeg.exe')`) and call `spawnTool`. Accept `{ spawnTool }` in the constructor so tests can inject a mock — see any binary-backed plugin.
 
-5. Add `tests/unit/<id>.test.js`, run `npm test`, then `npm run gen-register`, rebuild, and re-run `register.bat`.
+5. Add `tests/unit/<id>.test.js`, run `npm test`, then `npm run package`; installing the new Setup (or running `ContextHelper.exe --register`) adds the menu item.
 
 ## Bundled tools
 

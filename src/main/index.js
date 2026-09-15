@@ -8,8 +8,11 @@ const { classify } = require('./selection/classify');
 const { validate } = require('./selection/validate');
 const { runPreflight, runWorker } = require('./worker-runner');
 const { runDialogPlugin } = require('./runners/dialog-runner');
-const { runWindowPlugin, readUiHtmlFromDisk } = require('./runners/window-runner');
+const { runWindowPlugin, readUiHtmlFromDisk, makeShellController } = require('./runners/window-runner');
 const { createSpinnerWindow, createShellWindow } = require('./window-manager');
+const { createReg } = require('./shell-menu/reg');
+const { syncMenu, unregisterMenu } = require('./shell-menu/sync');
+const { describeMenuStatus } = require('./shell-menu/status-view');
 const { dispatch } = require('./dispatcher');
 const logger = require('./logger');
 const { ipcMain } = require('electron');
@@ -42,6 +45,15 @@ function createRunner(uiMode) {
   };
 }
 
+async function showMenuStatus(result, { itemCount }) {
+  const shellWindow = createShellWindow();
+  const shell = makeShellController({ shellWindow, ipcMain });
+  await new Promise((resolve) => shell.onReady(resolve));
+  shell.sendState(describeMenuStatus(result, { exePath: process.execPath, itemCount, logDir: logger.LOG_ROOT }));
+  await shell.waitForAction();
+  shell.close();
+}
+
 async function main() {
   Menu.setApplicationMenu(null);
   logger.pruneOld();
@@ -49,6 +61,10 @@ async function main() {
   const code = await dispatch({ argv }, {
     parseCli, loadAll, aggregateTargets, classify, validate, createRunner,
     dialog, fs, logger, pluginsDir: PLUGINS_DIR,
+    isPackaged: app.isPackaged,
+    syncShellMenu: ({ manifests }) => syncMenu({ exePath: process.execPath, manifests, reg: createReg() }),
+    unregisterShellMenu: () => unregisterMenu({ reg: createReg() }),
+    showMenuStatus,
   });
   logger.info('main: exit', { code });
   app.exit(code);

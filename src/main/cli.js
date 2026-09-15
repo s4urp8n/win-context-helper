@@ -5,6 +5,10 @@ function parseCli(argv) {
   const flags = {};
   const targets = [];
   for (const arg of argv) {
+    if (arg === '--register' || arg === '--unregister') {
+      if (argv.length !== 1) throw new Error(`parseCli: ${arg} cannot be combined with other arguments`);
+      return { kind: arg.slice(2) };
+    }
     if (!arg.startsWith('--')) {
       // positional → target
       targets.push(arg);

@@ -1,6 +1,8 @@
 node_modules/
 coverage/
 dist/builder-debug.yml
+dist/*.blockmap
+dist/builder-effective-config.yaml
 *.log
 .env
 .env.*
