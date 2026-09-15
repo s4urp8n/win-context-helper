@@ -4,69 +4,79 @@ const { BasePlugin } = require('../../src/shared/base-plugin');
 const { resolveCollision } = require('../../src/main/utils/collision');
 
 const MAX_LIST = 10;
+const MAX_RENAME_EXAMPLES = 3;
+const PATH_SEPARATOR = ' - ';
+const SCAN_PROGRESS_EVERY = 100;
+const PROGRESS_INTERVAL_MS = 150;
 const plural = (n, one, many) => n === 1 ? one : many;
 
-function walkFiles(root, onScanProgress) {
-  const out = [];
-  const stack = [root];
-  let lastEmit = 0;
-  while (stack.length > 0) {
-    const dir = stack.pop();
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) stack.push(full);
-      else if (entry.isFile()) {
-        out.push(full);
-        if (onScanProgress) {
-          const now = Date.now();
-          if (out.length % 100 === 0 && now - lastEmit >= 150) {
-            lastEmit = now;
-            onScanProgress({ scanned: out.length });
-          }
-        }
-      }
-    }
-  }
-  if (onScanProgress) onScanProgress({ scanned: out.length });
-  return out;
+// Explorer compares names case-insensitively and digit runs by value ("Lesson 2" < "Lesson 10").
+const byExplorerName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+// Visits files in Explorer order: at every level subfolders first, then files.
+// `dirs` holds the folder names between root and the file.
+function walkFiles(root, onFile) {
+  (function walk(dir, dirs) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true }).sort(byExplorerName);
+    for (const e of entries) if (e.isDirectory()) walk(path.join(dir, e.name), [...dirs, e.name]);
+    for (const e of entries) if (e.isFile()) onFile(path.join(dir, e.name), dirs, e.name);
+  })(root, []);
 }
 
-function pruneEmptyDirs(root) {
-  const stack = [];
-  (function walk(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) walk(path.join(dir, entry.name));
-    }
-    if (dir !== root) stack.push(dir);
-  })(root);
-  for (const dir of stack) {
-    try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch {}
-  }
+// NTFS is case-insensitive: "photo.jpg" and "PHOTO.jpg" name the same file.
+function caseInsensitiveNames(names) {
+  const keys = new Set(names.map((n) => n.toLowerCase()));
+  return {
+    has: (name) => keys.has(name.toLowerCase()),
+    add: (name) => keys.add(name.toLowerCase()),
+  };
 }
 
-function walkAndPlan(root, onScanProgress) {
-  const all = walkFiles(root, onScanProgress);
-  const toMove = all.filter((f) => path.dirname(f) !== root);
-  const takenInRoot = new Set(
-    fs.readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isFile())
-      .map((e) => e.name),
-  );
-  return { toMove, takenInRoot };
+function throttle(intervalMs) {
+  let last = 0;
+  return () => {
+    const now = Date.now();
+    if (now - last < intervalMs) return false;
+    last = now;
+    return true;
+  };
 }
 
-function countCollisions(toMove, takenInRoot) {
-  const seen = new Set(takenInRoot);
-  let collisions = 0;
-  for (const src of toMove) {
-    const name = path.basename(src);
-    if (seen.has(name)) collisions++;
-    else seen.add(name);
+// Decides the final root name of every nested file. Preflight and run share it,
+// so the confirm dialog reports exactly what run will do.
+// keepOrder puts the folder path into the name ("Lesson 1 - Chapter 1.mp4") so that
+// sorting the flat result by name keeps the original folder order.
+function planFolder(root, keepOrder, onFileScanned = () => {}) {
+  // Root subfolders stay on disk until the move ends, so their names are taken too.
+  const taken = caseInsensitiveNames(fs.readdirSync(root));
+  const moves = [];
+  let collisionCount = 0;
+  walkFiles(root, (src, dirs, name) => {
+    onFileScanned();
+    if (dirs.length === 0) return;
+    const desiredName = keepOrder ? [...dirs, name].join(PATH_SEPARATOR) : name;
+    if (taken.has(desiredName)) collisionCount++;
+    const targetName = resolveCollision(desiredName, taken);
+    taken.add(targetName);
+    moves.push({ src, relPath: path.relative(root, src), targetName });
+  });
+  return { moves, collisionCount };
+}
+
+function pruneEmptyDirs(dir, isRoot = true) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) pruneEmptyDirs(path.join(dir, e.name), false);
   }
-  return collisions;
+  if (isRoot || fs.readdirSync(dir).length > 0) return;
+  try { fs.rmdirSync(dir); } catch { /* locked or in use — leave it in place */ }
 }
 
 class FlattenFolder extends BasePlugin {
+  constructor({ keepOrder = false } = {}) {
+    super();
+    this.keepOrder = keepOrder;
+  }
+
   static get manifest() {
     return {
       id: 'flatten-folder',
@@ -81,88 +91,61 @@ class FlattenFolder extends BasePlugin {
   }
 
   async preflight({ targets, onProgress }) {
-    const folders = [];
-    let totalFiles = 0;
-    let totalCollisions = 0;
-    let cumulative = 0;
-    for (const root of targets) {
-      const { toMove, takenInRoot } = walkAndPlan(root, onProgress
-        ? ({ scanned }) => onProgress({ scanned: cumulative + scanned })
-        : null);
-      cumulative += toMove.length;
-      const collisionCount = countCollisions(toMove, takenInRoot);
-      folders.push({
+    let scanned = 0;
+    const tick = throttle(PROGRESS_INTERVAL_MS);
+    const onFileScanned = () => {
+      scanned++;
+      if (onProgress && scanned % SCAN_PROGRESS_EVERY === 0 && tick()) onProgress({ scanned });
+    };
+    const folders = targets.map((root) => {
+      const { moves, collisionCount } = planFolder(root, this.keepOrder, onFileScanned);
+      return {
         basename: path.basename(root),
-        fileCount: toMove.length,
+        fileCount: moves.length,
         collisionCount,
-      });
-      totalFiles += toMove.length;
-      totalCollisions += collisionCount;
-    }
+        renameExamples: moves.slice(0, MAX_RENAME_EXAMPLES).map((m) => ({ from: m.relPath, to: m.targetName })),
+      };
+    });
+    if (onProgress) onProgress({ scanned });
     folders.sort((a, b) => a.basename.localeCompare(b.basename));
-    return { folders, totalFiles, totalCollisions };
+    return {
+      folders,
+      totalFiles: folders.reduce((n, f) => n + f.fileCount, 0),
+      totalCollisions: folders.reduce((n, f) => n + f.collisionCount, 0),
+    };
   }
 
   buildRunningLabel(_ctx) { return 'Flattening…'; }
 
   async run({ targets, onProgress = () => {}, signal }) {
-    // Pre-compute grand total across all targets
-    let grandTotal = 0;
-    const plans = [];
-    for (const root of targets) {
-      const plan = walkAndPlan(root);
-      grandTotal += plan.toMove.length;
-      plans.push({ root, ...plan });
-    }
-
-    let processedTotal = 0;
-    let lastEmit = 0;
-    const emit = (current) => {
-      const now = Date.now();
-      if (now - lastEmit >= 150 || current === grandTotal) {
-        lastEmit = now;
-        onProgress({ processed: current, total: grandTotal, current: '' });
-      }
-    };
-
-    let processed = 0, skipped = 0;
+    const plans = targets.map((root) => ({ root, ...planFolder(root, this.keepOrder) }));
+    const total = plans.reduce((n, p) => n + p.moves.length, 0);
+    const tick = throttle(PROGRESS_INTERVAL_MS);
+    let processed = 0;
     const errors = [];
-    for (const { root, toMove, takenInRoot } of plans) {
-      const taken = new Set(takenInRoot);
-      for (const src of toMove) {
+    for (const { root, moves } of plans) {
+      for (const { src, relPath, targetName } of moves) {
         if (signal && signal.aborted) {
-          return { ok: false, processed, skipped, errors, aborted: true };
+          return { ok: false, processed, skipped: errors.length, errors, aborted: true };
         }
-        const baseName = path.basename(src);
-        const target = resolveCollision(baseName, taken);
         try {
-          fs.renameSync(src, path.join(root, target));
-          taken.add(target);
+          fs.renameSync(src, path.join(root, targetName));
           processed++;
-          processedTotal++;
-          emit(processedTotal);
         } catch (err) {
-          errors.push({ file: path.relative(root, src), message: err.message });
-          skipped++;
-          processedTotal++;
-          emit(processedTotal);
+          errors.push({ file: relPath, message: err.message });
         }
+        if (tick()) onProgress({ processed: processed + errors.length, total });
       }
       pruneEmptyDirs(root);
     }
-    // Final emit to ensure last state is always reported
-    onProgress({ processed, total: grandTotal });
-    return { ok: errors.length === 0, processed, skipped, errors };
-  }
-
-  isEmpty(_ctx, pre) {
-    return pre && pre.totalFiles === 0;
+    onProgress({ processed: processed + errors.length, total });
+    return { ok: errors.length === 0, processed, skipped: errors.length, errors };
   }
 
   buildNothingToDoBody(ctx, _pre) {
     const skipped = (ctx && ctx.selection && ctx.selection.skipped) || [];
     if (skipped.length > 0) {
-      const lines = [`Flatten folder works only with folders.`, `Selection contains ${skipped.length} ${plural(skipped.length, 'item', 'items')} that ${plural(skipped.length, 'is', 'are')} not a folder:`];
+      const lines = [`${this.constructor.manifest.label} works only with folders.`, `Selection contains ${skipped.length} ${plural(skipped.length, 'item', 'items')} that ${plural(skipped.length, 'is', 'are')} not a folder:`];
       for (const s of skipped.slice(0, MAX_LIST)) lines.push(`  • ${s.basename}`);
       if (skipped.length > MAX_LIST) lines.push(`  … and ${skipped.length - MAX_LIST} more`);
       return { message: 'Nothing to process.', detail: lines.join('\n') };
@@ -193,6 +176,13 @@ class FlattenFolder extends BasePlugin {
     if (totalCollisions > 0) {
       lines.push(`${totalCollisions} name ${plural(totalCollisions, 'collision', 'collisions')} will be resolved with "(N)" suffix.`);
     }
+    if (this.keepOrder) {
+      lines.push('');
+      lines.push('Each file gets its folder path in the name, for example:');
+      for (const e of folders.flatMap((f) => f.renameExamples).slice(0, MAX_RENAME_EXAMPLES)) {
+        lines.push(`  ${e.from} → ${e.to}`);
+      }
+    }
     if (skipped.length > 0) {
       lines.push('');
       lines.push(`The following ${plural(skipped.length, 'item will', 'items will')} be skipped (not a folder):`);
@@ -203,7 +193,8 @@ class FlattenFolder extends BasePlugin {
         lines.push(`  … and ${skipped.length - MAX_LIST} more`);
       }
     }
-    const message = folders.length === 1 ? 'Flatten this folder?' : `Flatten ${folders.length} folders?`;
+    const mode = this.keepOrder ? ' (keep order)' : '';
+    const message = folders.length === 1 ? `Flatten this folder${mode}?` : `Flatten ${folders.length} folders${mode}?`;
     return { message, detail: lines.join('\n') };
   }
 

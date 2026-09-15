@@ -9,11 +9,13 @@
     "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "smoke": "node tests/smoke/runner.js",
     "gen-register": "node scripts/gen-register-bat.js",
     "package": "electron-builder --dir"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "vitest": "^2.1.0"

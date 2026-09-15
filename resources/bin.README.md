@@ -1,6 +1,6 @@
 # resources/bin — external tool binaries
 
-This folder is gitignored. Download each tool once and place its Windows binary here. `electron-builder` bundles the entire folder into `dist/win-unpacked/resources/bin/` at package time.
+This folder is committed via Git LFS (see `.gitattributes`), so run `git lfs install` before cloning. To replace a tool, download it and put its Windows binary here. `electron-builder` bundles the entire folder into `dist/win-unpacked/resources/bin/` at package time.
 
 ## Required binaries (currently bundled)
 

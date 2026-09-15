@@ -30,6 +30,26 @@ cases.push({
   },
 });
 
+cases.push({
+  id: 'flatten-folder-keep-order',
+  async run() {
+    const FlattenFolderKeepOrder = require('../../plugins/flatten-folder-keep-order/plugin');
+    const instance = new FlattenFolderKeepOrder();
+    const dir = buildFlattenFixture();
+    try {
+      const pre = await instance.preflight({ targets: [dir] });
+      if (pre.totalFiles !== 5) throw new Error(`preflight expected 5 files, got ${pre.totalFiles}`);
+      const result = await instance.run({ targets: [dir], options: {}, onProgress: () => {} });
+      const entries = fs.readdirSync(dir).sort();
+      const expected = ['a - 1.txt', 'a - b - 2.txt', 'a - b - c - 3.txt', 'collision - photo.jpg', 'other - photo.jpg'];
+      if (entries.join('|') !== expected.join('|')) throw new Error(`unexpected root entries: ${entries.join(', ')}`);
+      return { ok: result.ok, summary: `${result.processed} files → path-prefixed names in root` };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+});
+
 (async function main() {
   let failures = 0;
   for (const c of cases) {

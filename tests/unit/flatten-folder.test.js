@@ -11,6 +11,10 @@ function tree(root, layout) {
   }
 }
 
+function readFile(dir, name) {
+  return fs.readFileSync(path.join(dir, name), 'utf8');
+}
+
 function listFiles(dir) {
   return fs.readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile())
@@ -236,5 +240,167 @@ describe('FlattenFolder', () => {
   it('buildRunningLabel returns Flattening…', () => {
     const p = new FlattenFolder();
     expect(p.buildRunningLabel({})).toBe('Flattening…');
+  });
+
+  describe('collision naming follows Explorer order', () => {
+    it('the first folder keeps the plain name: 1\\file → file, 2\\file → file (2)', async () => {
+      tree(tmp, { '1/file': 'from 1', '2/file': 'from 2' });
+      await new FlattenFolder().run({ targets: [tmp] });
+      expect(readFile(tmp, 'file')).toBe('from 1');
+      expect(readFile(tmp, 'file (2)')).toBe('from 2');
+    });
+
+    it('compares numbers in folder names by value (Lesson 2 before Lesson 10)', async () => {
+      tree(tmp, { 'Lesson 10/x.txt': '10', 'Lesson 2/x.txt': '2', 'Lesson 1/x.txt': '1' });
+      await new FlattenFolder().run({ targets: [tmp] });
+      expect(readFile(tmp, 'x.txt')).toBe('1');
+      expect(readFile(tmp, 'x (2).txt')).toBe('2');
+      expect(readFile(tmp, 'x (3).txt')).toBe('10');
+    });
+
+    it('visits subfolders before the files of the same folder', async () => {
+      tree(tmp, { 'a/x.txt': 'a file', 'a/sub/x.txt': 'sub file' });
+      await new FlattenFolder().run({ targets: [tmp] });
+      expect(readFile(tmp, 'x.txt')).toBe('sub file');
+      expect(readFile(tmp, 'x (2).txt')).toBe('a file');
+    });
+  });
+
+  describe('collision detection', () => {
+    it('treats names differing only by case as a collision instead of overwriting', async () => {
+      tree(tmp, { 'a/photo.jpg': 'A', 'b/PHOTO.jpg': 'B' });
+      const result = await new FlattenFolder().run({ targets: [tmp] });
+      expect(result.ok).toBe(true);
+      expect(readFile(tmp, 'photo.jpg')).toBe('A');
+      expect(readFile(tmp, 'PHOTO (2).jpg')).toBe('B');
+    });
+
+    it('does not move a file onto a root subfolder with the same name', async () => {
+      tree(tmp, { 'a/b/a': 'deep' });
+      const result = await new FlattenFolder().run({ targets: [tmp] });
+      expect(result).toMatchObject({ ok: true, processed: 1, errors: [] });
+      expect(readFile(tmp, 'a (2)')).toBe('deep');
+    });
+
+    it('preflight reports exactly the collisions that run resolves', async () => {
+      tree(tmp, { 'a/x.txt': '1', 'b/x.txt': '2', 'c/x (2).txt': '3' });
+      const pre = await new FlattenFolder().preflight({ targets: [tmp] });
+      expect(pre.totalCollisions).toBe(2);
+      expect(pre.folders[0].collisionCount).toBe(2);
+      await new FlattenFolder().run({ targets: [tmp] });
+      expect(listFiles(tmp)).toEqual(['x (2) (2).txt', 'x (2).txt', 'x.txt']);
+    });
+  });
+
+  it('preflight scan progress never goes backwards across folders', async () => {
+    const second = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-flatten-second-'));
+    try {
+      const layout = { 'root-1.txt': 'r', 'root-2.txt': 'r' };
+      for (let i = 0; i < 100; i++) layout[`sub/f${i}.txt`] = 'x';
+      tree(tmp, layout);
+      tree(second, { 'sub/only.txt': 'x' });
+      const events = [];
+      await new FlattenFolder().preflight({ targets: [tmp, second], onProgress: (p) => events.push(p.scanned) });
+      for (let i = 1; i < events.length; i++) expect(events[i]).toBeGreaterThanOrEqual(events[i - 1]);
+      expect(events.at(-1)).toBe(103);
+    } finally {
+      fs.rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  describe('failures during run', () => {
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('records a file that vanished mid-run and keeps moving the rest', async () => {
+      tree(tmp, { 'a/1.txt': '1', 'a/2.txt': '2', 'a/3.txt': '3' });
+      let removed = false;
+      const result = await new FlattenFolder().run({
+        targets: [tmp],
+        onProgress: () => {
+          if (removed) return;
+          removed = true;
+          fs.unlinkSync(path.join(tmp, 'a', '2.txt'));
+        },
+      });
+      expect(result).toMatchObject({ ok: false, processed: 2, skipped: 1 });
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].file).toBe(path.join('a', '2.txt'));
+      expect(result.errors[0].message).toMatch(/ENOENT/);
+      expect(listFiles(tmp)).toEqual(['1.txt', '3.txt']);
+    });
+
+    it('leaves an emptied subfolder in place when it cannot be removed', async () => {
+      tree(tmp, { 'a/x.txt': 'x' });
+      vi.spyOn(fs, 'rmdirSync').mockImplementation(() => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      });
+      const result = await new FlattenFolder().run({ targets: [tmp] });
+      expect(result).toMatchObject({ ok: true, processed: 1, errors: [] });
+      expect(readFile(tmp, 'x.txt')).toBe('x');
+      expect(fs.existsSync(path.join(tmp, 'a'))).toBe(true);
+    });
+  });
+
+  describe('dialog texts', () => {
+    const names = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+    const skippedItems = (n) => names(n, 'file').map((b) => ({ path: `/${b}`, basename: b, reason: 'WRONG_TYPE' }));
+    const bullets = (text) => text.split('\n').filter((l) => l.startsWith('  • '));
+
+    it('nothing-to-do says the folders are already flat when nothing was skipped', () => {
+      const out = new FlattenFolder().buildNothingToDoBody({}, { folders: [], totalFiles: 0 });
+      expect(out.message).toBe('Nothing to do.');
+      expect(out.detail).not.toMatch(/works only with folders/);
+    });
+
+    it('nothing-to-do lists at most 10 skipped items', () => {
+      const ctx = { selection: { skipped: skippedItems(12) } };
+      const out = new FlattenFolder().buildNothingToDoBody(ctx, { folders: [], totalFiles: 0 });
+      expect(bullets(out.detail)).toHaveLength(10);
+      expect(out.detail).toMatch(/… and 2 more/);
+    });
+
+    it('confirm lists at most 10 folders', () => {
+      const folders = names(12, 'dir').map((basename) => ({ basename, fileCount: 1, collisionCount: 0 }));
+      const out = new FlattenFolder().buildConfirmMessage({}, { folders, totalFiles: 12, totalCollisions: 0 });
+      expect(bullets(out.detail)).toHaveLength(10);
+      expect(out.detail).toMatch(/… and 2 more/);
+    });
+
+    it('confirm lists at most 10 skipped items', () => {
+      const ctx = { selection: { skipped: skippedItems(11) } };
+      const pre = { folders: [{ basename: 'a', fileCount: 1, collisionCount: 0 }], totalFiles: 1, totalCollisions: 0 };
+      const out = new FlattenFolder().buildConfirmMessage(ctx, pre);
+      expect(bullets(out.detail)).toHaveLength(1 + 10);
+      expect(out.detail).toMatch(/… and 1 more/);
+    });
+
+    it('confirm in the plain mode shows no rename examples', async () => {
+      tree(tmp, { 'Lesson 1/Chapter 1.mp4': '' });
+      const plugin = new FlattenFolder();
+      const out = plugin.buildConfirmMessage({}, await plugin.preflight({ targets: [tmp] }));
+      expect(out.message).toBe('Flatten this folder?');
+      expect(out.detail).not.toMatch(/→/);
+    });
+
+    it('error body lists every failed file with its reason', () => {
+      const errors = [{ file: path.join('a', '1.txt'), message: 'EBUSY' }, { file: 'b.txt', message: 'EPERM' }];
+      const body = new FlattenFolder().buildErrorBody({}, errors, 3, 5);
+      expect(body.split('\n')).toEqual([
+        '3 of 5 files moved.',
+        '2 files could not be moved:',
+        `  • ${path.join('a', '1.txt')} — EBUSY`,
+        '  • b.txt — EPERM',
+      ]);
+    });
+
+    it('error body uses singular forms and caps the list at 10', () => {
+      const one = new FlattenFolder().buildErrorBody({}, [{ file: 'x', message: 'm' }], 0, 1);
+      expect(one.split('\n').slice(0, 2)).toEqual(['0 of 1 file moved.', '1 file could not be moved:']);
+
+      const many = names(13, 'f').map((file) => ({ file, message: 'm' }));
+      const body = new FlattenFolder().buildErrorBody({}, many, 0, 13);
+      expect(bullets(body)).toHaveLength(10);
+      expect(body).toMatch(/… and 3 more/);
+    });
   });
 });

@@ -57,6 +57,11 @@ reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder"
 reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder" /v MultiSelectModel /t REG_SZ /d "Player" /f
 reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder\command" /ve /t REG_SZ /d "\"%EXE%\" --action=flatten-folder \"%%V\"" /f
 
+REM --- flatten-folder-keep-order ---
+reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder-keep-order" /v MUIVerb /t REG_SZ /d "Flatten folder (keep order)" /f
+reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder-keep-order" /v MultiSelectModel /t REG_SZ /d "Player" /f
+reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\flatten-folder-keep-order\command" /ve /t REG_SZ /d "\"%EXE%\" --action=flatten-folder-keep-order \"%%V\"" /f
+
 REM --- images-to-pdf ---
 reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\images-to-pdf" /v MUIVerb /t REG_SZ /d "Images to PDF" /f
 reg add "HKCU\Software\Classes\Directory\ContextHelperRoot\shell\images-to-pdf" /v MultiSelectModel /t REG_SZ /d "Player" /f
