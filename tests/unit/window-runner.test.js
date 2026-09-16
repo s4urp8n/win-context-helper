@@ -131,6 +131,67 @@ describe('runWindowPlugin', () => {
     expect(seen.worker).toBe('/my/bin');
   });
 
+  describe('shared dialog contract', () => {
+    // Answers each dialog state as soon as the runner shows it.
+    function repliesTo(shell, replies) {
+      const send = shell.win.webContents.send;
+      shell.win.webContents.send = (channel, payload) => {
+        send(channel, payload);
+        const action = channel === 'shell:set-state' && replies[payload.state];
+        if (action) setImmediate(() => shell.fireAction(action));
+      };
+    }
+    const table = { columns: ['File', 'Problem'], rows: [{ cells: ['x', 'y'] }] };
+
+    it('stops with the blocked body before the form and exits 2', async () => {
+      class BlockedPlugin extends StubPlugin {
+        buildBlockedBody() { return { message: 'Cannot start', detail: 'd', table }; }
+      }
+      const shell = makeShellMock();
+      repliesTo(shell, { error: { action: 'ok' } });
+      const code = await runWindowPlugin({
+        manifest, plugin: new BlockedPlugin(), pluginDir: '/fake',
+        targets: ['/a'], selection, binDir: '/bin',
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalFiles: 1 }),
+        runWorker: () => { throw new Error('not called'); },
+        readUiHtml: () => '',
+        logger: { info() {}, error() {} },
+      });
+      expect(code).toBe(2);
+      expect(shell.states.map((s) => s.state)).toEqual(['scanning', 'error']);
+      expect(shell.states[1]).toEqual({ state: 'error', message: 'Cannot start', detail: 'd', table });
+    });
+
+    it('shows an error body object, hands over the run result and logs the failure', async () => {
+      const seen = [];
+      class TablePlugin extends StubPlugin {
+        buildErrorBody(_ctx, errors, processed, total, result) {
+          seen.push({ errors, processed, total, result });
+          return { detail: 'put back', table };
+        }
+      }
+      const result = { ok: false, processed: 0, errors: [{ file: 'x', message: 'EBUSY' }] };
+      const logged = [];
+      const shell = makeShellMock();
+      repliesTo(shell, { form: { action: 'start', options: {} }, error: { action: 'ok' } });
+      const code = await runWindowPlugin({
+        manifest, plugin: new TablePlugin(), pluginDir: '/fake',
+        targets: ['/a'], selection, binDir: '/bin',
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalItems: 4 }),
+        runWorker: ({ onComplete }) => { setImmediate(() => onComplete(result)); return {}; },
+        readUiHtml: () => '',
+        logger: { info() {}, error: (msg, meta) => logged.push({ msg, meta }) },
+      });
+      expect(code).toBe(1);
+      expect(seen).toEqual([{ errors: result.errors, processed: 0, total: 4, result }]);
+      expect(shell.states.find((s) => s.state === 'error'))
+        .toEqual({ state: 'error', message: 'Stub — completed with errors', detail: 'put back', table });
+      expect(logged).toContainEqual({ msg: 'window-runner: run failed', meta: { plugin: 's', errors: result.errors, notRestored: [] } });
+    });
+  });
+
   it('exits 0 when window closes mid-form', async () => {
     const shell = makeShellMock();
     setTimeout(() => shell.fireClose(), 25);

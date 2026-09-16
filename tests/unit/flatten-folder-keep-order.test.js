@@ -113,39 +113,40 @@ describe('FlattenFolderKeepOrder', () => {
       expect(pre.totalCollisions).toBe(0);
     });
 
-    it('shows the first three planned renames in the confirm dialog', async () => {
+    it('shows every planned rename as a table row', async () => {
       tree(tmp, {
         'Lesson 1/Chapter 1.mp4': '', 'Lesson 1/Chapter 2.mp4': '',
         'Lesson 2/Chapter 1.mp4': '', 'Lesson 2/Chapter 2.mp4': '',
       });
       const plugin = new FlattenFolderKeepOrder();
       const pre = await plugin.preflight({ targets: [tmp] });
-      const { message, detail } = plugin.buildConfirmMessage({}, pre);
+      const { message, table } = plugin.buildConfirmMessage({}, pre);
       expect(message).toBe('Flatten this folder (keep order)?');
-      expect(detail).toContain(`${path.join('Lesson 1', 'Chapter 1.mp4')} → Lesson 1 - Chapter 1.mp4`);
-      expect(detail).toContain(`${path.join('Lesson 1', 'Chapter 2.mp4')} → Lesson 1 - Chapter 2.mp4`);
-      expect(detail).toContain(`${path.join('Lesson 2', 'Chapter 1.mp4')} → Lesson 2 - Chapter 1.mp4`);
-      expect(detail).not.toContain('Lesson 2 - Chapter 2.mp4');
+      expect(table.rows.map((r) => r.cells)).toEqual([
+        [path.join('Lesson 1', 'Chapter 1.mp4'), 'Lesson 1 - Chapter 1.mp4'],
+        [path.join('Lesson 1', 'Chapter 2.mp4'), 'Lesson 1 - Chapter 2.mp4'],
+        [path.join('Lesson 2', 'Chapter 1.mp4'), 'Lesson 2 - Chapter 1.mp4'],
+        [path.join('Lesson 2', 'Chapter 2.mp4'), 'Lesson 2 - Chapter 2.mp4'],
+      ]);
     });
 
-    it('sends at most three rename examples per folder, not the whole plan', async () => {
-      tree(tmp, { 'a/1.txt': '', 'a/2.txt': '', 'a/3.txt': '', 'a/4.txt': '', 'a/5.txt': '' });
-      const pre = await new FlattenFolderKeepOrder().preflight({ targets: [tmp] });
-      expect(pre.folders[0].fileCount).toBe(5);
-      expect(pre.folders[0].renameExamples.map((e) => e.to)).toEqual(['a - 1.txt', 'a - 2.txt', 'a - 3.txt']);
-    });
-
-    it('takes rename examples across several selected folders', async () => {
+    it('groups the renames of several selected folders', async () => {
       const second = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-flatten-keep-second-'));
       try {
         tree(tmp, { 'x/1.txt': '' });
         tree(second, { 'y/2.txt': '' });
         const plugin = new FlattenFolderKeepOrder();
         const pre = await plugin.preflight({ targets: [tmp, second] });
-        const { message, detail } = plugin.buildConfirmMessage({}, pre);
+        const { message, table } = plugin.buildConfirmMessage({}, pre);
         expect(message).toBe('Flatten 2 folders (keep order)?');
-        expect(detail).toContain(`${path.join('x', '1.txt')} → x - 1.txt`);
-        expect(detail).toContain(`${path.join('y', '2.txt')} → y - 2.txt`);
+        const [first, last] = [tmp, second].map((d) => path.basename(d)).sort((a, b) => a.localeCompare(b));
+        const rowOf = (dir) => (dir === path.basename(tmp) ? [path.join('x', '1.txt'), 'x - 1.txt'] : [path.join('y', '2.txt'), 'y - 2.txt']);
+        expect(table.rows).toEqual([
+          { group: `${first} — 1 file` },
+          { cells: rowOf(first), badges: [] },
+          { group: `${last} — 1 file` },
+          { cells: rowOf(last), badges: [] },
+        ]);
       } finally {
         fs.rmSync(second, { recursive: true, force: true });
       }

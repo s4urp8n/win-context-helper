@@ -9,12 +9,13 @@ html, body {
   overflow: hidden;
 }
 
-/* Body grows to fit content; the renderer reports documentElement.scrollHeight
-   to main which resizes the window via setContentSize. */
+/* Body fills the window. shell.js contentHeight() measures the natural height and main
+   resizes the window via setContentSize; when the window is capped, the detail and the
+   table shrink and scroll so the buttons stay visible. */
 body {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .titlebar {
@@ -57,17 +58,23 @@ body {
   justify-content: center;
 }
 
-.titlebar .ctrl:hover {
+.titlebar .ctrl:hover:not(:disabled) {
   background: #e5e5e5;
 }
 
-.titlebar .ctrl-close:hover {
+.titlebar .ctrl-close:hover:not(:disabled) {
   background: #e81123;
   color: #fff;
 }
 
+.titlebar .ctrl:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 #app {
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 18px 20px;
@@ -85,7 +92,8 @@ body {
 #app[data-state="error"]    .state[data-state="error"] {
   display: flex;
   flex-direction: column;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .row { display: flex; align-items: center; gap: 14px; }
@@ -147,6 +155,92 @@ body {
   display: none;
 }
 
+/* Plan / problem tables: long names wrap inside their cell, zebra rows keep them apart. */
+.table-wrap {
+  flex: 0 1 auto;
+  min-height: 90px;
+  max-height: 420px;
+  overflow: auto;
+  margin: 0 0 12px 0;
+  border: 1px solid #dcdfe3;
+  border-radius: 4px;
+  background: #fff;
+  user-select: text;
+}
+
+.table-wrap[hidden] {
+  display: none;
+}
+
+/* Next to a table the summary keeps its lines; only the table gives up height. */
+.state:has(> .table-wrap:not([hidden])) > .detail {
+  flex-shrink: 0;
+  max-height: 150px;
+}
+
+.table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef1f5;
+  color: #444;
+  font-weight: 600;
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #dcdfe3;
+}
+
+.table-wrap td {
+  padding: 5px 10px;
+  vertical-align: top;
+  color: #222;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap th + th,
+.table-wrap td + td {
+  border-left: 1px solid #e6e9ed;
+}
+
+.table-wrap tr.even td {
+  background: #e9eff7;
+}
+
+.table-wrap tr.group td {
+  background: #e2eaf4;
+  color: #1d3f66;
+  font-weight: 600;
+  border-top: 1px solid #cfdae8;
+}
+
+.table-wrap .badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #fff1d6;
+  color: #8a5a00;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.table-footer {
+  padding: 6px 10px;
+  border-top: 1px solid #e6e9ed;
+  background: #fafafa;
+  color: #666;
+  font-size: 12px;
+}
+
 .buttons {
   flex: 0 0 auto;
   display: flex;
@@ -175,6 +269,13 @@ button.primary {
 }
 
 button.primary:hover { background: #1864a8; }
+
+.buttons .note {
+  margin-right: auto;
+  align-self: center;
+  font-size: 12px;
+  color: #8a5a00;
+}
 
 .spinner {
   width: 28px;
@@ -228,7 +329,8 @@ button.primary:hover { background: #1864a8; }
 #app[data-state="form"] .state[data-state="form"] {
   display: flex;
   flex-direction: column;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .form-summary {

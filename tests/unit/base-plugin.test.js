@@ -57,6 +57,10 @@ describe('BasePlugin', () => {
     expect(body).toMatch(/and 5 more/);
   });
 
+  it('buildBlockedBody default lets every run start', () => {
+    expect(new StubPlugin().buildBlockedBody({}, { totalFiles: 3 })).toBeNull();
+  });
+
   it('buildScanningLabel default', () => {
     const p = new StubPlugin();
     expect(p.buildScanningLabel({})).toBe('Scanning…');

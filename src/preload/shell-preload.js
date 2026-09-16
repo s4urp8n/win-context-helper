@@ -12,5 +12,5 @@ contextBridge.exposeInMainWorld('shell', {
   },
   minimize: () => ipcRenderer.send(IPC.SHELL_MIN),
   close: () => ipcRenderer.send(IPC.SHELL_CLOSE),
-  resize: (height) => ipcRenderer.send(IPC.SHELL_RESIZE, { height }),
+  resize: (height, width) => ipcRenderer.send(IPC.SHELL_RESIZE, { height, width }),
 });

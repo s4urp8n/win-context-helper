@@ -1,19 +1,88 @@
 const app = document.getElementById('app');
+const closeButton = document.getElementById('ctrl-close');
 app.dataset.state = 'scanning';
 
-function requestResize() {
+// Tables need room for two or three columns of long file names.
+const TABLE_WIDTH = 760;
+
+// Natural height of the page. The body is pinned to the window height, so that a long table
+// scrolls instead of pushing the buttons out of a capped window; it is released to measure.
+function contentHeight() {
+  document.body.style.height = 'auto';
+  const h = Math.ceil(document.body.getBoundingClientRect().height);
+  document.body.style.height = '';
+  return h;
+}
+
+function requestResize(wide = false) {
   // Two RAFs: first lets the browser apply the state-data attribute change,
   // second measures after layout has settled.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      const h = document.documentElement.scrollHeight;
-      window.shell.resize(h);
+      if (wide && window.innerWidth < TABLE_WIDTH) {
+        // Widen first, then measure again: rows wrap less in a wider window.
+        window.addEventListener('resize', () => requestResize(), { once: true });
+        window.shell.resize(contentHeight(), TABLE_WIDTH);
+        return;
+      }
+      window.shell.resize(contentHeight());
     });
   });
 }
 
+// table: { columns: [..], rows: [{ cells: [..], badges?: [..] } | { group }], footer? }
+// Returns true when the table has rows to show.
+function renderTable(container, table) {
+  container.replaceChildren();
+  const hasRows = !!(table && table.rows && table.rows.length > 0);
+  container.hidden = !hasRows;
+  if (!hasRows) return false;
+
+  const el = document.createElement('table');
+  const head = el.createTHead().insertRow();
+  for (const title of table.columns) {
+    const th = document.createElement('th');
+    th.textContent = title;
+    head.appendChild(th);
+  }
+  const body = el.createTBody();
+  let stripe = 0;
+  for (const row of table.rows) {
+    const tr = body.insertRow();
+    if (row.group !== undefined) {
+      tr.className = 'group';
+      const td = tr.insertCell();
+      td.colSpan = table.columns.length;
+      td.textContent = row.group;
+      stripe = 0;
+      continue;
+    }
+    if (stripe++ % 2 === 1) tr.className = 'even';
+    for (const text of row.cells || []) tr.insertCell().textContent = text;
+    for (const badge of row.badges || []) {
+      const span = document.createElement('span');
+      span.className = 'badge';
+      span.textContent = badge;
+      tr.lastElementChild.append(span);
+    }
+  }
+  container.appendChild(el);
+
+  if (table.footer) {
+    const footer = document.createElement('div');
+    footer.className = 'table-footer';
+    footer.textContent = table.footer;
+    container.appendChild(footer);
+  }
+  return true;
+}
+
 window.shell.onSetState((payload) => {
   app.dataset.state = payload.state;
+  // A started operation cannot be cancelled, so its window cannot be closed either.
+  closeButton.disabled = payload.state === 'running';
+  closeButton.title = closeButton.disabled ? 'The operation cannot be cancelled' : 'Close';
+  let wide = false;
   if (payload.state === 'scanning' || payload.state === 'running') {
     const id = payload.state + '-label';
     if (payload.label) document.getElementById(id).textContent = payload.label;
@@ -21,9 +90,11 @@ window.shell.onSetState((payload) => {
   } else if (payload.state === 'info' || payload.state === 'confirm' || payload.state === 'error') {
     document.getElementById(payload.state + '-message').textContent = payload.message || '';
     document.getElementById(payload.state + '-detail').textContent = payload.detail || '';
-    // Focus the primary button so Enter activates it
+    wide = renderTable(document.getElementById(payload.state + '-table'), payload.table);
+    // Enter acknowledges a message, but never starts an operation that cannot be undone.
+    const target = payload.state === 'confirm' ? 'button[data-action="cancel"]' : 'button.primary';
     setTimeout(() => {
-      const btn = document.querySelector(`[data-state="${payload.state}"] button.primary`);
+      const btn = document.querySelector(`section.state[data-state="${payload.state}"] ${target}`);
       if (btn) btn.focus();
     }, 0);
   } else if (payload.state === 'form') {
@@ -35,7 +106,7 @@ window.shell.onSetState((payload) => {
       if (first) first.focus();
     }, 0);
   }
-  requestResize();
+  requestResize(wide);
 });
 
 function updateProgress(stateName, progress) {

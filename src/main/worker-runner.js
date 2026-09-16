@@ -16,6 +16,8 @@ function runWorker({ workerPath, targets, options, selection, binDir, onProgress
   child.on('exit', (code) => {
     if (code !== 0) onError?.({ message: `Worker exited with code ${code}` });
   });
+  // The process may fail to start at all (missing executable, blocked by antivirus).
+  child.on('error', (err) => onError?.({ message: err.message }));
 
   child.send({ type: 'start', workerPath, targets, options, selection, binDir });
 

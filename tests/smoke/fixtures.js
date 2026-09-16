@@ -23,4 +23,21 @@ function buildFlattenFixture() {
   return dir;
 }
 
-module.exports = { buildFlattenFixture };
+// Three levels of 95-character folder names: joined, the name passes the 255-character limit.
+function buildLongNamesFixture() {
+  const dir = mkdtemp('ch-smoke-long-');
+  const long = (tag) => `${tag} ${'x'.repeat(93)}`;
+  const layout = {
+    [`${long('A')}/short.txt`]: 'a',
+    [`${long('B')}/${long('C')}/${long('D')}/deep.txt`]: 'deep',
+    [`${long('E')}/other.txt`]: 'e',
+  };
+  for (const [rel, content] of Object.entries(layout)) {
+    const full = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+  return dir;
+}
+
+module.exports = { buildFlattenFixture, buildLongNamesFixture };

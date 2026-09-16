@@ -16,4 +16,4 @@ function resolveCollision(desiredName, takenSet) {
   throw new Error(`resolveCollision: gave up after 10000 attempts for "${desiredName}"`);
 }
 
-module.exports = { resolveCollision };
+module.exports = { resolveCollision, splitExt };

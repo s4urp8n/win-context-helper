@@ -10,7 +10,7 @@ module.exports = {
     SHELL_ACTION:    'shell:action',     // renderer → main: { action }
     SHELL_MIN:       'shell:min',        // renderer → main: minimize window
     SHELL_CLOSE:     'shell:close',      // renderer → main: close window
-    SHELL_RESIZE:    'shell:resize',     // renderer → main: { height }
+    SHELL_RESIZE:    'shell:resize',     // renderer → main: { height, width? }
   },
   WORKER_MSG: {
     PROGRESS: 'worker:progress',

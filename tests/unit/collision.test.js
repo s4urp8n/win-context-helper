@@ -1,4 +1,15 @@
-const { resolveCollision } = require('../../src/main/utils/collision');
+const { resolveCollision, splitExt } = require('../../src/main/utils/collision');
+
+describe('splitExt', () => {
+  it('splits at the last dot', () => {
+    expect(splitExt('archive.tar.gz')).toEqual({ base: 'archive.tar', ext: '.gz' });
+  });
+
+  it('keeps a dotfile and a name without a dot whole', () => {
+    expect(splitExt('.gitignore')).toEqual({ base: '.gitignore', ext: '' });
+    expect(splitExt('README')).toEqual({ base: 'README', ext: '' });
+  });
+});
 
 describe('resolveCollision', () => {
   it('returns original name when no collision', () => {

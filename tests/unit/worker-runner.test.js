@@ -50,6 +50,24 @@ describe('runWorker', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it('reports a worker process that cannot be started', async () => {
+    const realExecPath = process.execPath;
+    let errorPayload;
+    try {
+      errorPayload = await new Promise((resolve) => {
+        process.execPath = path.join(os.tmpdir(), 'ch-missing', 'node.exe');
+        try {
+          runWorker({ workerPath: 'x', targets: [], options: {}, onError: resolve, onComplete: resolve });
+        } finally {
+          process.execPath = realExecPath;
+        }
+      });
+    } finally {
+      process.execPath = realExecPath;
+    }
+    expect(errorPayload.message).toMatch(/ENOENT|EPIPE/);
+  });
+
   it('relays a worker-thrown error via onError', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-worker-runner-err-'));
     const stubPath = writeClassPlugin(tmp, 'BoomPlugin', `

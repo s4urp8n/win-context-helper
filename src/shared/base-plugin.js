@@ -29,6 +29,11 @@ class BasePlugin {
     return { message: `Process ${n} item(s)?`, detail: '' };
   }
 
+  // Returning { message, detail, table } (or a string) stops the run before the confirm step.
+  buildBlockedBody(_ctx, _pre) {
+    return null;
+  }
+
   buildRejectedBody(_ctx, rejected) {
     const lines = [`Selection contains ${rejected.length} invalid path(s):`];
     for (const r of rejected.slice(0, MAX_ERRORS_IN_BODY)) lines.push(`  • ${r.basename}`);
@@ -38,7 +43,9 @@ class BasePlugin {
     return lines.join('\n');
   }
 
-  buildErrorBody(_ctx, errors, processed, total) {
+  // Body hooks (nothing-to-do, confirm, blocked, error) return text or { message, detail, table }.
+  // `result` is the object run() returned.
+  buildErrorBody(_ctx, errors, processed, total, _result) {
     const lines = [
       `${processed} of ${total} processed.`,
       `${errors.length} could not be processed:`,

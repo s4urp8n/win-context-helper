@@ -39,6 +39,7 @@
       <div class="form-summary" id="form-summary"></div>
       <form class="form-fields" id="form-fields" autocomplete="off"></form>
       <div class="buttons">
+        <span class="note">Cannot be cancelled once started.</span>
         <button class="primary" data-action="start">Start</button>
         <button data-action="cancel">Cancel</button>
       </div>
@@ -50,6 +51,7 @@
         <div class="message" id="info-message"></div>
       </div>
       <pre class="detail" id="info-detail"></pre>
+      <div class="table-wrap" id="info-table" hidden></div>
       <div class="buttons"><button class="primary" data-action="ok">OK</button></div>
     </section>
 
@@ -59,7 +61,9 @@
         <div class="message" id="confirm-message"></div>
       </div>
       <pre class="detail" id="confirm-detail"></pre>
+      <div class="table-wrap" id="confirm-table" hidden></div>
       <div class="buttons">
+        <span class="note">Cannot be cancelled once started.</span>
         <button class="primary" data-action="continue">Continue</button>
         <button data-action="cancel">Cancel</button>
       </div>
@@ -82,6 +86,7 @@
         <div class="message" id="error-message"></div>
       </div>
       <pre class="detail" id="error-detail"></pre>
+      <div class="table-wrap" id="error-table" hidden></div>
       <div class="buttons"><button class="primary" data-action="ok">OK</button></div>
     </section>
   </div>

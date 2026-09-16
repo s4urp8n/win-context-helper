@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { buildFlattenFixture } = require('./fixtures');
+const { buildFlattenFixture, buildLongNamesFixture } = require('./fixtures');
 
 const args = process.argv.slice(2);
 const onlyPlugin = (args.find((a) => a.startsWith('--plugin=')) || '').slice('--plugin='.length);
@@ -50,11 +50,38 @@ cases.push({
   },
 });
 
+cases.push({
+  id: 'flatten-folder-keep-order',
+  label: 'keep-order, long names',
+  async run() {
+    const FlattenFolderKeepOrder = require('../../plugins/flatten-folder-keep-order/plugin');
+    const instance = new FlattenFolderKeepOrder();
+    const dir = buildLongNamesFixture();
+    try {
+      const pre = await instance.preflight({ targets: [dir] });
+      if (pre.totalShortened < 1) throw new Error('preflight expected a shortened name');
+      const result = await instance.run({ targets: [dir], options: {}, onProgress: () => {} });
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      if (entries.some((e) => !e.isFile())) throw new Error('subfolders left behind');
+      if (entries.some((e) => path.join(dir, e.name).length > 259)) throw new Error('a path is longer than 259 characters');
+      const order = entries
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+        .map((n) => fs.readFileSync(path.join(dir, n), 'utf8'))
+        .join('|');
+      if (order !== 'a|deep|e') throw new Error(`order broken: ${order}`);
+      return { ok: result.ok, summary: `${result.processed} files, 1 name shortened, order kept` };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  },
+});
+
 (async function main() {
   let failures = 0;
   for (const c of cases) {
     if (onlyPlugin && c.id !== onlyPlugin) continue;
-    process.stdout.write(`${c.id.padEnd(28)} `);
+    process.stdout.write(`${(c.label || c.id).padEnd(28)} `);
     try {
       const r = await c.run();
       if (r.ok) console.log(`✓ ${r.summary}`);
