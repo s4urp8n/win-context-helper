@@ -27,10 +27,13 @@ function makeShellMock() {
   const fireAction = (action) => {
     if (ipcListeners['shell:action']) ipcListeners['shell:action']({}, { action });
   };
+  const fire = (payload) => {
+    if (ipcListeners['shell:action']) ipcListeners['shell:action']({}, payload);
+  };
   const fireClose = () => {
     if (winListeners['closed']) winListeners['closed']();
   };
-  return { states, win, ipcMain, fireAction, fireClose };
+  return { states, win, ipcMain, fireAction, fire, fireClose };
 }
 
 class StubPlugin extends BasePlugin {
@@ -358,7 +361,7 @@ describe('runDialogPlugin', () => {
         runWorker: () => { throw new Error('not called'); },
         logger,
       });
-      expect(shell.states.find((s) => s.state === 'confirm')).toEqual({ state: 'confirm', message: 'Go?', detail: 'd', table });
+      expect(shell.states.find((s) => s.state === 'confirm')).toEqual({ state: 'confirm', message: 'Go?', detail: 'd', table, canContinue: true });
     });
 
     it('passes the nothing-to-do table to the shell', async () => {
@@ -429,6 +432,110 @@ describe('runDialogPlugin', () => {
       expect(options).toEqual({ planId: 'abc' });
     });
 
+    // Answers the confirm states one after another.
+    function answerConfirms(shell, answers) {
+      const send = shell.win.webContents.send;
+      shell.win.webContents.send = (channel, payload) => {
+        send(channel, payload);
+        if (channel === 'shell:set-state' && payload.state === 'confirm' && answers.length > 0) {
+          const answer = answers.shift();
+          setImmediate(() => shell.fire(answer));
+        }
+      };
+    }
+
+    const runRecorder = () => {
+      const seen = {};
+      const runWorker = (args) => {
+        seen.options = args.options;
+        setImmediate(() => args.onComplete({ ok: true, errors: [] }));
+        return {};
+      };
+      return { seen, runWorker };
+    };
+
+    it('rebuilds the confirm body when an option changes and runs with the options on screen', async () => {
+      const asked = [];
+      class OptionsPlugin extends StubPlugin {
+        buildConfirmMessage(_ctx, _pre, options) {
+          asked.push(options);
+          const on = options.mode !== false;
+          return { message: on ? 'On' : 'Off', options: [{ name: 'mode', label: 'Mode', checked: on }], runOptions: { mode: on } };
+        }
+      }
+      const shell = makeShellMock();
+      answerConfirms(shell, [
+        { action: 'options', options: { mode: false } },
+        { action: 'options', options: { other: true } },
+        { action: 'continue' },
+      ]);
+      const { seen, runWorker } = runRecorder();
+      const code = await runDialogPlugin({
+        manifest, plugin: new OptionsPlugin(), pluginDir: '/fake', targets: ['/a'], selection,
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalFiles: 1, planId: 'ignored' }),
+        runWorker,
+        logger: { info() {}, error() {} },
+      });
+      expect(code).toBe(0);
+      expect(asked).toEqual([{}, { mode: false }, { mode: false, other: true }]);
+      const confirms = shell.states.filter((s) => s.state === 'confirm');
+      expect(confirms.map((s) => [s.message, s.options[0].checked])).toEqual([['On', true], ['Off', false], ['Off', false]]);
+      expect(seen.options).toEqual({ mode: false });
+    });
+
+    it('ignores Continue while the confirm body forbids it', async () => {
+      class GuardedPlugin extends StubPlugin {
+        buildConfirmMessage(_ctx, _pre, options) {
+          return { message: 'Go?', canContinue: options.fix === true, runOptions: { fix: options.fix } };
+        }
+      }
+      const shell = makeShellMock();
+      answerConfirms(shell, [
+        { action: 'continue' },
+        { action: 'options', options: { fix: true } },
+        { action: 'continue' },
+      ]);
+      const { seen, runWorker } = runRecorder();
+      await runDialogPlugin({
+        manifest, plugin: new GuardedPlugin(), pluginDir: '/fake', targets: ['/a'], selection,
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalFiles: 1 }),
+        runWorker,
+        logger: { info() {}, error() {} },
+      });
+      expect(shell.states.filter((s) => s.state === 'confirm').map((s) => s.canContinue)).toEqual([false, false, true]);
+      expect(seen.options).toEqual({ fix: true });
+    });
+
+    it('cancels from a rebuilt confirm without running', async () => {
+      const shell = makeShellMock();
+      answerConfirms(shell, [{ action: 'options' }, { action: 'cancel' }]);
+      const code = await runDialogPlugin({
+        manifest, plugin: new StubPlugin(), pluginDir: '/fake', targets: ['/a'], selection,
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalFiles: 1 }),
+        runWorker: () => { throw new Error('not called'); },
+        logger: { info() {}, error() {} },
+      });
+      expect(code).toBe(0);
+      expect(shell.states.filter((s) => s.state === 'confirm')).toHaveLength(2);
+    });
+
+    it('runs without options when neither the body nor the preflight gives any', async () => {
+      const shell = makeShellMock();
+      answerConfirms(shell, [{ action: 'continue' }]);
+      const { seen, runWorker } = runRecorder();
+      await runDialogPlugin({
+        manifest, plugin: new StubPlugin(), pluginDir: '/fake', targets: ['/a'], selection,
+        openShell: () => shell.win, ipcMain: shell.ipcMain,
+        runPreflight: async () => ({ totalFiles: 1 }),
+        runWorker,
+        logger: { info() {}, error() {} },
+      });
+      expect(seen.options).toEqual({});
+    });
+
     it('logs what a failed run left behind', async () => {
       const shell = makeShellMock();
       repliesTo(shell, { confirm: 'continue', error: 'ok' });
@@ -480,7 +587,7 @@ describe('runDialogPlugin', () => {
         logger: { info() {}, error() {} },
       });
       expect(confirmShell.states.find((s) => s.state === 'confirm'))
-        .toEqual({ state: 'confirm', message: 'Continue?', detail: 'Move 3 files' });
+        .toEqual({ state: 'confirm', message: 'Continue?', detail: 'Move 3 files', canContinue: true });
 
       const infoShell = makeShellMock();
       repliesTo(infoShell, { info: 'ok' });

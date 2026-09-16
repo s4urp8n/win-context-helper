@@ -1,80 +1,82 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { buildFlattenFixture, buildLongNamesFixture } = require('./fixtures');
+const { explorerCompare } = require('../../src/main/utils/explorer-compare');
 
 const args = process.argv.slice(2);
 const onlyPlugin = (args.find((a) => a.startsWith('--plugin=')) || '').slice('--plugin='.length);
 
 const cases = [];
 
+// Preflight, then run the options the confirm dialog would pass for `options`.
+async function flatten(dir, options) {
+  const FlattenFolder = require('../../plugins/flatten-folder/plugin');
+  const plugin = new FlattenFolder();
+  const pre = await plugin.preflight({ targets: [dir] });
+  const confirm = plugin.buildConfirmMessage({}, pre, options);
+  if (!confirm.canContinue) throw new Error('the plan cannot run');
+  const result = await plugin.run({ targets: [dir], options: confirm.runOptions, onProgress: () => {} });
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  if (entries.some((e) => !e.isFile())) throw new Error('subfolders left behind');
+  const names = entries.map((e) => e.name).sort(explorerCompare);
+  const contents = names.map((n) => fs.readFileSync(path.join(dir, n), 'utf8'));
+  return { pre, result, names, contents };
+}
+
+function withFixture(build, check) {
+  return async () => {
+    const dir = build();
+    try {
+      return await check(dir);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
 cases.push({
   id: 'flatten-folder',
-  async run() {
-    const FlattenFolder = require('../../plugins/flatten-folder/plugin');
-    const instance = new FlattenFolder();
-    const dir = buildFlattenFixture();
-    try {
-      const pre = await instance.preflight({ targets: [dir] });
-      if (typeof pre.totalFiles !== 'number') throw new Error('preflight returned no totalFiles');
-      const result = await instance.run({ targets: [dir], options: {}, onProgress: () => {} });
-      const rootFiles = fs.readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isFile()).map((e) => e.name).sort();
-      const subdirs = fs.readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isDirectory()).length;
-      if (subdirs !== 0) throw new Error(`expected 0 subdirs, got ${subdirs}`);
-      if (rootFiles.length !== 5) throw new Error(`expected 5 root files, got ${rootFiles.length}`);
-      return { ok: result.ok, summary: `${result.processed} files → ${rootFiles.length} in root` };
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  },
+  label: 'flatten, plain names',
+  run: withFixture(buildFlattenFixture, async (dir) => {
+    const { result, names } = await flatten(dir, { keepHierarchy: false });
+    const expected = ['1.txt', '2.txt', '3.txt', 'photo (2).jpg', 'photo.jpg'];
+    if ([...names].sort().join('|') !== expected.join('|')) throw new Error(`unexpected root entries: ${names.join(', ')}`);
+    return { ok: result.ok, summary: `${result.processed} files → ${names.length} in root` };
+  }),
 });
 
 cases.push({
-  id: 'flatten-folder-keep-order',
-  async run() {
-    const FlattenFolderKeepOrder = require('../../plugins/flatten-folder-keep-order/plugin');
-    const instance = new FlattenFolderKeepOrder();
-    const dir = buildFlattenFixture();
-    try {
-      const pre = await instance.preflight({ targets: [dir] });
-      if (pre.totalFiles !== 5) throw new Error(`preflight expected 5 files, got ${pre.totalFiles}`);
-      const result = await instance.run({ targets: [dir], options: {}, onProgress: () => {} });
-      const entries = fs.readdirSync(dir).sort();
-      const expected = ['a - 1.txt', 'a - b - 2.txt', 'a - b - c - 3.txt', 'collision - photo.jpg', 'other - photo.jpg'];
-      if (entries.join('|') !== expected.join('|')) throw new Error(`unexpected root entries: ${entries.join(', ')}`);
-      return { ok: result.ok, summary: `${result.processed} files → path-prefixed names in root` };
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  },
+  id: 'flatten-folder',
+  label: 'flatten, hierarchy mixed',
+  run: withFixture(buildFlattenFixture, async (dir) => {
+    const { result, names } = await flatten(dir, { foldersFirst: false });
+    const expected = ['a - 1.txt', 'a - b - 2.txt', 'a - b - c - 3.txt', 'collision - photo.jpg', 'other - photo.jpg'];
+    if (names.join('|') !== expected.join('|')) throw new Error(`unexpected root entries: ${names.join(', ')}`);
+    return { ok: result.ok, summary: `${result.processed} files → path-prefixed names, no numbers` };
+  }),
 });
 
 cases.push({
-  id: 'flatten-folder-keep-order',
-  label: 'keep-order, long names',
-  async run() {
-    const FlattenFolderKeepOrder = require('../../plugins/flatten-folder-keep-order/plugin');
-    const instance = new FlattenFolderKeepOrder();
-    const dir = buildLongNamesFixture();
-    try {
-      const pre = await instance.preflight({ targets: [dir] });
-      if (pre.totalShortened < 1) throw new Error('preflight expected a shortened name');
-      const result = await instance.run({ targets: [dir], options: {}, onProgress: () => {} });
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      if (entries.some((e) => !e.isFile())) throw new Error('subfolders left behind');
-      if (entries.some((e) => path.join(dir, e.name).length > 259)) throw new Error('a path is longer than 259 characters');
-      const order = entries
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
-        .map((n) => fs.readFileSync(path.join(dir, n), 'utf8'))
-        .join('|');
-      if (order !== 'a|deep|e') throw new Error(`order broken: ${order}`);
-      return { ok: result.ok, summary: `${result.processed} files, 1 name shortened, order kept` };
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  },
+  id: 'flatten-folder',
+  label: 'flatten, folders first',
+  run: withFixture(buildFlattenFixture, async (dir) => {
+    const { pre, result, contents } = await flatten(dir, {});
+    if (!pre.variants.tree.folders[0].numbered) throw new Error('expected numbered names');
+    if (contents.join('|') !== '3|2|1|A|B') throw new Error(`order broken: ${contents.join('|')}`);
+    return { ok: result.ok, summary: `${result.processed} files → numbered, subfolders first` };
+  }),
+});
+
+cases.push({
+  id: 'flatten-folder',
+  label: 'flatten, long names',
+  run: withFixture(buildLongNamesFixture, async (dir) => {
+    const { pre, result, names, contents } = await flatten(dir, {});
+    if (pre.variants.tree.totalShortened < 1) throw new Error('preflight expected a shortened name');
+    if (names.some((n) => path.join(dir, n).length > 259)) throw new Error('a path is longer than 259 characters');
+    if (contents.join('|') !== 'a|deep|e') throw new Error(`order broken: ${contents.join('|')}`);
+    return { ok: result.ok, summary: `${result.processed} files, ${pre.variants.tree.totalShortened} name shortened, order kept` };
+  }),
 });
 
 (async function main() {

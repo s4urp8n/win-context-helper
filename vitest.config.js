@@ -10,7 +10,7 @@ module.exports = {
       reporter: ['text', 'json'],
       thresholds: {
         'plugins/flatten-folder/**': FULL,
-        'plugins/flatten-folder-keep-order/**': FULL,
+        'src/main/utils/explorer-compare.js': FULL,
         'src/main/shell-menu/**': FULL,
       },
     },

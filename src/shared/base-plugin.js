@@ -24,7 +24,11 @@ class BasePlugin {
     };
   }
 
-  buildConfirmMessage(_ctx, pre) {
+  // `options` holds the dialog checkboxes the body offered ({ options: [{ name, label, checked,
+  // disabled? }] }), as the user set them; the body is rebuilt on every change. Besides message,
+  // detail (or `facts` lines), table and tableTitle it may return `canContinue: false` and
+  // `runOptions` for run().
+  buildConfirmMessage(_ctx, pre, _options) {
     const n = (pre && pre.folders && pre.folders.length) || 1;
     return { message: `Process ${n} item(s)?`, detail: '' };
   }

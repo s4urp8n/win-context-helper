@@ -2,9 +2,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { BasePlugin } = require('../../src/shared/base-plugin');
-const { planFolder, MAX_PATH_LENGTH } = require('./plan');
+const { explorerCompare } = require('../../src/main/utils/explorer-compare');
+const { scanFolder, planScanned, MAX_PATH_LENGTH } = require('./plan');
 
 const MAX_LIST = 10;
+const MAX_FACT_NAMES = 5;
 const MAX_TABLE_ROWS = 1000;
 const SCAN_PROGRESS_EVERY = 100;
 const PROGRESS_INTERVAL_MS = 150;
@@ -12,11 +14,24 @@ const PROBLEM_COLUMNS = ['File', 'Problem'];
 const MOVE_CLOSER_HINT = 'Move the folder closer to the drive root (for example D:\\Temp) and try again.';
 const UNCHANGED = 'the folders are exactly as they were.';
 
+// The dialog options. Both are on unless the user turns them off; "folders first" only
+// matters while the hierarchy is kept.
+const VARIANTS = {
+  tree: { keepHierarchy: true, foldersFirst: true },
+  mixed: { keepHierarchy: true, foldersFirst: false },
+  flat: { keepHierarchy: false, foldersFirst: true },
+};
+function variantKey(options = {}) {
+  if (options.keepHierarchy === false) return 'flat';
+  return options.foldersFirst === false ? 'mixed' : 'tree';
+}
+
 const plural = (n, one, many) => (n === 1 ? one : many);
 const formatCount = (n, one, many) => `${n} ${plural(n, one, many)}`;
 const formatFiles = (n) => formatCount(n, 'file', 'files');
 const keptDirsLine = (n) => `${formatCount(n, 'subfolder stays: it holds', 'subfolders stay: they hold')} links or other items that are not moved.`;
 const moreFiles = (n) => (n > 0 ? `… and ${n} more ${plural(n, 'file', 'files')}` : undefined);
+const sumOf = (items, key) => items.reduce((n, item) => n + item[key], 0);
 // A drive root such as "D:\" has no base name.
 const folderName = (root) => path.basename(root) || root;
 
@@ -81,10 +96,15 @@ function outermostTargets(targets) {
   return { roots, nested };
 }
 
-function planAll(targets, keepOrder, onFileScanned) {
+// Scans every selected folder once and plans it for each of the requested variants.
+function planAll(targets, keys, onFileScanned) {
   const { roots, nested } = outermostTargets(targets);
-  const plans = roots.map((root) => ({ root, folder: folderName(root), ...planFolder(root, keepOrder, onFileScanned) }));
-  return { plans, nested };
+  const scans = roots.map((root) => scanFolder(root, onFileScanned));
+  const variants = {};
+  for (const key of keys) {
+    variants[key] = scans.map((scan) => ({ root: scan.root, folder: folderName(scan.root), ...planScanned(scan, VARIANTS[key]) }));
+  }
+  return { variants, nested };
 }
 
 // Identifies the exact plan shown in the preview; run refuses to carry out any other.
@@ -138,25 +158,54 @@ function capRows(folders, key) {
   }
 }
 
-// `items` are { group, cells, badges? }. With `grouped`, each new group starts with a group row.
-function buildTable(columns, items, { total = items.length, grouped } = {}) {
-  const byGroup = grouped === undefined ? new Set(items.map((i) => i.group)).size > 1 : grouped;
+// What the dialog needs to show one variant.
+function previewOf(plans) {
+  const folders = plans.map((plan) => ({
+    basename: plan.folder,
+    path: plan.root,
+    fileCount: plan.fileCount,
+    rowCount: plan.moves.length,
+    renamedInRootCount: plan.renamedInRootCount,
+    collisionCount: plan.collisionCount,
+    shortenedCount: plan.shortenedCount,
+    numbered: plan.numbered,
+    blockedCount: plan.blocked.length,
+    moves: plan.moves.map((m) => ({ from: m.relPath, to: m.targetName, shortened: m.shortened, renamed: m.renamed })),
+    blocked: plan.blocked.map((b) => ({ file: b.relPath, message: b.reason })),
+  }));
+  folders.sort((a, b) => explorerCompare(a.basename, b.basename));
+  capRows(folders, 'moves');
+  capRows(folders, 'blocked');
+  return {
+    planId: planDigest(plans),
+    folders,
+    totalRows: sumOf(folders, 'rowCount'),
+    totalRenamedInRoot: sumOf(folders, 'renamedInRootCount'),
+    totalCollisions: sumOf(folders, 'collisionCount'),
+    totalShortened: sumOf(folders, 'shortenedCount'),
+    totalBlocked: sumOf(folders, 'blockedCount'),
+  };
+}
+
+// `items` are { group, cells, badges? }; each new group, even the only one, starts with a
+// header row naming the folder.
+function buildTable(columns, items, { total = items.length } = {}) {
   const shown = items.slice(0, MAX_TABLE_ROWS);
   const rows = [];
   shown.forEach((item, i) => {
-    if (byGroup && (i === 0 || shown[i - 1].group !== item.group)) rows.push({ group: item.group });
+    if (i === 0 || shown[i - 1].group !== item.group) rows.push({ group: item.group });
     rows.push(item.badges ? { cells: item.cells, badges: item.badges } : { cells: item.cells });
   });
   return { columns, rows, footer: moreFiles(total - shown.length) };
 }
 
-function planTable(folders, totalFiles) {
-  const items = folders.flatMap((f) => f.moves.map((m) => ({
+function planTable(view) {
+  const items = view.folders.flatMap((f) => f.moves.map((m) => ({
     group: `${f.basename} — ${formatFiles(f.fileCount)}${f.numbered ? ', numbered' : ''}`,
     cells: [m.from, m.to],
     badges: [m.shortened && 'shortened', m.renamed && 'suffix added'].filter(Boolean),
   })));
-  return buildTable(['From', 'New name'], items, { total: totalFiles, grouped: folders.length > 1 });
+  return buildTable(['From', 'New name'], items, { total: view.totalRows });
 }
 
 const problemItems = (list) => list.map((p) => ({ group: p.folder, cells: [p.file, p.message] }));
@@ -167,12 +216,14 @@ function putBackSummary(moved) {
   return `All ${moved} files moved before that were put back — ${UNCHANGED}`;
 }
 
-class FlattenFolder extends BasePlugin {
-  constructor({ keepOrder = false } = {}) {
-    super();
-    this.keepOrder = keepOrder;
-  }
+function skippedLines(skipped, intro) {
+  const lines = [intro];
+  for (const s of skipped.slice(0, MAX_LIST)) lines.push(`  • ${s.basename}`);
+  if (skipped.length > MAX_LIST) lines.push(`  … and ${skipped.length - MAX_LIST} more`);
+  return lines;
+}
 
+class FlattenFolder extends BasePlugin {
   static get manifest() {
     return {
       id: 'flatten-folder',
@@ -186,6 +237,7 @@ class FlattenFolder extends BasePlugin {
     };
   }
 
+  // Plans every variant at once, so switching an option in the dialog needs no new scan.
   async preflight({ targets, onProgress }) {
     let scanned = 0;
     const tick = throttle(PROGRESS_INTERVAL_MS);
@@ -193,54 +245,22 @@ class FlattenFolder extends BasePlugin {
       scanned++;
       if (onProgress && scanned % SCAN_PROGRESS_EVERY === 0 && tick()) onProgress({ scanned });
     };
-    const { plans, nested } = planAll(targets, this.keepOrder, onFileScanned);
+    const { variants, nested } = planAll(targets, Object.keys(VARIANTS), onFileScanned);
     if (onProgress) onProgress({ scanned });
-    const folders = plans.map((plan) => ({
-      basename: plan.folder,
-      path: plan.root,
-      fileCount: plan.moves.length,
-      collisionCount: plan.collisionCount,
-      shortenedCount: plan.shortenedCount,
-      emptyDirCount: plan.emptyDirCount,
-      keptDirCount: plan.keptDirCount,
-      numbered: plan.numbered,
-      blockedCount: plan.blocked.length,
-      moves: plan.moves.map((m) => ({ from: m.relPath, to: m.targetName, shortened: m.shortened, renamed: m.renamed })),
-      blocked: plan.blocked.map((b) => ({ file: b.relPath, message: b.reason })),
-    }));
-    folders.sort((a, b) => a.basename.localeCompare(b.basename));
-    capRows(folders, 'moves');
-    capRows(folders, 'blocked');
-    const sum = (key) => folders.reduce((n, f) => n + f[key], 0);
+    // These counts are the same for every variant.
+    const plans = variants.flat;
     return {
-      folders,
       insideOthers: nested.map(folderName),
-      planId: planDigest(plans),
-      totalFiles: sum('fileCount'),
-      totalCollisions: sum('collisionCount'),
-      totalShortened: sum('shortenedCount'),
-      totalEmptyDirs: sum('emptyDirCount'),
-      totalKeptDirs: sum('keptDirCount'),
-      totalBlocked: sum('blockedCount'),
+      folderCount: plans.length,
+      totalFiles: sumOf(plans, 'fileCount'),
+      totalEmptyDirs: sumOf(plans, 'emptyDirCount'),
+      totalKeptDirs: sumOf(plans, 'keptDirCount'),
+      variants: Object.fromEntries(Object.entries(variants).map(([key, list]) => [key, previewOf(list)])),
     };
   }
 
   isEmpty(_ctx, pre) {
     return pre.totalFiles === 0 && !pre.totalEmptyDirs;
-  }
-
-  buildBlockedBody(_ctx, pre) {
-    if (!pre || !pre.totalBlocked) return null;
-    const items = problemItems(pre.folders.flatMap((f) => f.blocked.map((b) => ({ folder: f.basename, ...b }))));
-    return {
-      message: `${this.constructor.manifest.label} — cannot start`,
-      detail: [
-        `${formatCount(pre.totalBlocked, 'file cannot', 'files cannot')} be given a name: the folder path is too long for Windows (${MAX_PATH_LENGTH} characters max).`,
-        MOVE_CLOSER_HINT,
-        'Nothing was changed.',
-      ].join('\n'),
-      table: buildTable(PROBLEM_COLUMNS, items, { total: pre.totalBlocked, grouped: pre.folders.length > 1 }),
-    };
   }
 
   buildRunningLabel(_ctx) { return 'Flattening…'; }
@@ -249,7 +269,8 @@ class FlattenFolder extends BasePlugin {
   // subfolders are removed only after every file has been moved. Once started, the run
   // cannot be cancelled.
   async run({ targets, options = {}, onProgress = () => {} }) {
-    const { plans } = planAll(targets, this.keepOrder);
+    const key = variantKey(options);
+    const plans = planAll(targets, [key]).variants[key];
     if (options.planId && options.planId !== planDigest(plans)) {
       return { ok: false, stale: true, processed: 0, skipped: 0, errors: [], moved: 0, notRestored: [] };
     }
@@ -267,7 +288,7 @@ class FlattenFolder extends BasePlugin {
           moveFile(m.src, dest);
         } catch (err) {
           const notRestored = putBack(moved);
-          // processed: files that stay in the root because they could not be put back.
+          // processed: files that keep the new name because they could not be put back.
           return {
             ok: false,
             processed: notRestored.length,
@@ -291,10 +312,11 @@ class FlattenFolder extends BasePlugin {
   buildNothingToDoBody(ctx, pre) {
     const skipped = (ctx && ctx.selection && ctx.selection.skipped) || [];
     if (skipped.length > 0) {
-      const lines = [`${this.constructor.manifest.label} works only with folders.`, `Selection contains ${skipped.length} ${plural(skipped.length, 'item', 'items')} that ${plural(skipped.length, 'is', 'are')} not a folder:`];
-      for (const s of skipped.slice(0, MAX_LIST)) lines.push(`  • ${s.basename}`);
-      if (skipped.length > MAX_LIST) lines.push(`  … and ${skipped.length - MAX_LIST} more`);
-      return { message: 'Nothing to process.', detail: lines.join('\n') };
+      const intro = `Selection contains ${skipped.length} ${plural(skipped.length, 'item', 'items')} that ${plural(skipped.length, 'is', 'are')} not a folder:`;
+      return {
+        message: 'Nothing to process.',
+        detail: [`${this.constructor.manifest.label} works only with folders.`, ...skippedLines(skipped, intro)].join('\n'),
+      };
     }
     const kept = pre.totalKeptDirs || 0;
     return {
@@ -303,54 +325,27 @@ class FlattenFolder extends BasePlugin {
     };
   }
 
-  buildConfirmMessage(ctx, pre) {
-    const { folders, totalFiles, totalCollisions, totalShortened = 0, totalEmptyDirs = 0, totalKeptDirs = 0, insideOthers = [] } = pre;
+  // `options` are the dialog checkboxes as the user left them; missing ones are on.
+  buildConfirmMessage(ctx, pre, options = {}) {
+    const key = variantKey(options);
+    const view = pre.variants[key];
+    const keepHierarchy = VARIANTS[key].keepHierarchy;
+    const foldersFirst = options.foldersFirst !== false;
+    const several = pre.folderCount > 1;
     const skipped = (ctx && ctx.selection && ctx.selection.skipped) || [];
-    const several = folders.length > 1;
-    const lines = [];
-    if (several) {
-      if (totalFiles > 0) lines.push(`${formatFiles(totalFiles)} from ${folders.length} folders will be moved, each folder into its own root.`);
-    } else {
-      lines.push(`Folder: ${folders[0].path}`);
-      if (totalFiles > 0) lines.push(`${formatFiles(totalFiles)} will be moved into the folder root.`);
-    }
-    if (totalEmptyDirs > 0) {
-      lines.push(totalFiles > 0
-        ? `${formatCount(totalEmptyDirs, 'subfolder', 'subfolders')} will be removed (empty after the move).`
-        : `${formatCount(totalEmptyDirs, 'empty subfolder', 'empty subfolders')} will be removed.`);
-    }
-    if (totalKeptDirs > 0) lines.push(keptDirsLine(totalKeptDirs));
-    if (totalCollisions > 0) {
-      lines.push(`${formatCount(totalCollisions, 'name collision', 'name collisions')} will be resolved with "(N)" suffix.`);
-    }
-    if (totalShortened > 0) {
-      lines.push(`${formatCount(totalShortened, 'name is', 'names are')} too long for Windows and will be shortened.`);
-    }
-    const numbered = folders.filter((f) => f.numbered).length;
-    if (numbered > 0) {
-      const who = several ? `In ${formatCount(numbered, 'folder', 'folders')} files get` : 'Files get';
-      lines.push(`${who} a number prefix (001, 002…) so the shortened names keep their order.`);
-    }
-    if (insideOthers.length > 0) {
-      lines.push(`Also selected, but inside another selected folder (flattened with it): ${insideOthers.join(', ')}`);
-    }
-    if (totalFiles > 0) lines.push('If any file cannot be moved, all files are put back.');
-    if (skipped.length > 0) {
-      lines.push('');
-      lines.push(`The following ${plural(skipped.length, 'item will', 'items will')} be skipped (not a folder):`);
-      for (const s of skipped.slice(0, MAX_LIST)) {
-        lines.push(`  • ${s.basename}`);
-      }
-      if (skipped.length > MAX_LIST) {
-        lines.push(`  … and ${skipped.length - MAX_LIST} more`);
-      }
-    }
-    const mode = this.keepOrder ? ' (keep order)' : '';
-    const message = several ? `Flatten ${folders.length} folders${mode}?` : `Flatten this folder${mode}?`;
+    const body = view.totalBlocked > 0 ? blockedFacts(pre, key) : planFacts(pre, view);
+    if (skipped.length > 0) body.facts.push(skippedFact(skipped));
     return {
-      message,
-      detail: lines.join('\n'),
-      table: totalFiles > 0 ? planTable(folders, totalFiles) : undefined,
+      message: several ? `Flatten ${pre.folderCount} folders?` : 'Flatten this folder?',
+      facts: body.facts,
+      table: body.table,
+      tableTitle: body.tableTitle,
+      options: pre.totalFiles > 0 ? [
+        { name: 'keepHierarchy', label: 'Keep hierarchy — put folder names into file names', checked: keepHierarchy },
+        { name: 'foldersFirst', label: 'Folders before files, as Explorer lists them', checked: foldersFirst, disabled: !keepHierarchy, nested: true },
+      ] : undefined,
+      canContinue: view.totalBlocked === 0,
+      runOptions: { keepHierarchy, foldersFirst, planId: view.planId },
     };
   }
 
@@ -361,6 +356,60 @@ class FlattenFolder extends BasePlugin {
     if (!result.notRestored || result.notRestored.length === 0) return rolledBackBody(label, errors, result.moved || 0);
     return notRestoredBody(label, errors, result.moved, result.notRestored);
   }
+}
+
+const fact = (label, value, tone) => (tone ? { label, value, tone } : { label, value });
+const listed = (parts) => parts.filter(Boolean).join(', ');
+
+function folderFact(pre, view) {
+  return pre.folderCount > 1 ? fact('Folders', String(pre.folderCount)) : fact('Folder', view.folders[0].path);
+}
+
+function skippedFact(skipped) {
+  const names = skipped.slice(0, MAX_FACT_NAMES).map((s) => s.basename).join(', ');
+  const more = skipped.length > MAX_FACT_NAMES ? ` +${skipped.length - MAX_FACT_NAMES} more` : '';
+  return fact('Skipped', `${skipped.length} not ${plural(skipped.length, 'a folder', 'folders')}: ${names}${more}`);
+}
+
+function planFacts(pre, view) {
+  const { totalFiles, totalEmptyDirs = 0, totalKeptDirs = 0, insideOthers = [] } = pre;
+  const facts = [folderFact(pre, view)];
+  if (totalFiles > 0) facts.push(fact('Files', `${totalFiles} to move`));
+  const subfolders = listed([
+    totalEmptyDirs > 0 && `${totalEmptyDirs} ${totalFiles > 0 ? '' : 'empty, '}removed`,
+    totalKeptDirs > 0 && `${totalKeptDirs} kept (${plural(totalKeptDirs, 'holds', 'hold')} links)`,
+  ]);
+  if (subfolders) facts.push(fact('Subfolders', subfolders));
+  const numbered = view.folders.filter((f) => f.numbered).length;
+  if (numbered > 0) {
+    const where = pre.folderCount > 1 ? `${numbered} of ${pre.folderCount} folders: ` : '';
+    const roots = view.totalRenamedInRoot;
+    const rootNote = roots > 0 ? `; ${roots} root ${plural(roots, 'file', 'files')} renamed too` : '';
+    facts.push(fact('Numbering', `${where}001, 002… — names alone would change the order${rootNote}`));
+  }
+  const names = listed([
+    view.totalShortened > 0 && `${view.totalShortened} shortened to fit`,
+    view.totalCollisions > 0 && `${view.totalCollisions} ${plural(view.totalCollisions, 'gets', 'get')} a (N) suffix`,
+  ]);
+  if (names) facts.push(fact('Names', names));
+  if (insideOthers.length > 0) facts.push(fact('Included', `${insideOthers.join(', ')} — inside another selected folder`));
+  if (totalFiles > 0) facts.push(fact('On error', 'everything is put back'));
+  return { facts, table: totalFiles > 0 ? planTable(view) : undefined };
+}
+
+// The chosen options leave no room for some names; another choice may fit.
+function blockedFacts(pre, key) {
+  const view = pre.variants[key];
+  const n = view.totalBlocked;
+  const facts = [
+    folderFact(pre, view),
+    fact('Problem', `${n} ${plural(n, 'file does', 'files do')} not fit the ${MAX_PATH_LENGTH}-character path limit`, 'warn'),
+    fact('Fix', key !== 'flat' && pre.variants.flat.totalBlocked === 0
+      ? 'turn off "Keep hierarchy"'
+      : 'move the folder closer to the drive root, e.g. D:\\Temp'),
+  ];
+  const items = problemItems(view.folders.flatMap((f) => f.blocked.map((b) => ({ folder: f.basename, ...b }))));
+  return { facts, table: buildTable(PROBLEM_COLUMNS, items, { total: n }), tableTitle: 'Files that do not fit' };
 }
 
 function staleRunBody(label) {

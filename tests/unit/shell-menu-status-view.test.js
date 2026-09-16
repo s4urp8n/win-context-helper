@@ -16,11 +16,11 @@ describe('describeMenuStatus', () => {
   });
 
   it('lists what was repaired', () => {
-    const result = { ok: true, changes: [{ kind: 'set' }], lines: ['Added menu item "Flatten folder (keep order)"'] };
+    const result = { ok: true, changes: [{ kind: 'set' }], lines: ['Added menu item "Merge folders"'] };
     expect(describeMenuStatus(result, context)).toEqual({
       state: 'info',
       message: 'Explorer menu repaired',
-      detail: ['Added menu item "Flatten folder (keep order)"', '', String.raw`Program: C:\Apps\ContextHelper.exe`].join('\n'),
+      detail: ['Added menu item "Merge folders"', '', String.raw`Program: C:\Apps\ContextHelper.exe`].join('\n'),
     });
   });
 

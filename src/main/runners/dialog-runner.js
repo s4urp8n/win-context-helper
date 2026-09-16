@@ -1,6 +1,6 @@
 const { safeHook } = require('./safe-hook');
 const { runWorkerPromise, runPreflightPromise } = require('./base-runner');
-const { makeShellController, asBody } = require('./shell-controller');
+const { makeShellController, asBody, asConfirmBody } = require('./shell-controller');
 
 function isValidPreflightShape(pre) {
   return pre && typeof pre === 'object';
@@ -79,18 +79,32 @@ async function runDialogPlugin({
     return 0;
   }
 
-  // 4. Confirm
-  const confirm = safeHook(plugin, 'buildConfirmMessage',
-    (_c, p) => ({ message: `Process ${(p && p.folders && p.folders.length) || 1} item(s)?`, detail: '' }),
-    logger, ctx, pre);
-  shell.sendState({ ...asBody(confirm, 'Continue?'), state: 'confirm' });
-  const { action } = await shell.waitForAction();
-  if (action !== 'continue') { shell.close(); return 0; }
+  // 4. Confirm. Changing an option in the dialog rebuilds the confirm body from the same
+  // preflight; the body that was on screen when Continue was pressed decides the run options.
+  let options = {};
+  let runOptions;
+  for (;;) {
+    const confirm = safeHook(plugin, 'buildConfirmMessage',
+      (_c, p) => ({ message: `Process ${(p && p.folders && p.folders.length) || 1} item(s)?`, detail: '' }),
+      logger, ctx, pre, options);
+    const body = asConfirmBody(confirm, 'Continue?');
+    shell.sendState({ ...body, state: 'confirm' });
+    const reply = await shell.waitForAction();
+    if (reply.action === 'options') {
+      options = { ...options, ...reply.options };
+      continue;
+    }
+    if (reply.action !== 'continue') { shell.close(); return 0; }
+    if (!body.canContinue) continue;
+    // The plan id lets the plugin refuse a plan that differs from the confirmed one.
+    runOptions = (confirm && confirm.runOptions) || (pre.planId ? { planId: pre.planId } : {});
+    break;
+  }
 
-  // 5. Run. The plan id lets the plugin refuse a plan that differs from the confirmed one.
+  // 5. Run.
   shell.sendState({ state: 'running', label: runningLabel });
   const outcome = await runWorkerPromise(runWorker, {
-    workerPath, targets, options: pre.planId ? { planId: pre.planId } : {}, selection, binDir,
+    workerPath, targets, options: runOptions, selection, binDir,
     onProgress: (p) => {
       shell.sendState({ state: 'running', label: runningLabel, progress: p });
     },

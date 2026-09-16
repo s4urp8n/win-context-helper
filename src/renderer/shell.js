@@ -38,25 +38,32 @@ function renderTable(container, table) {
   container.hidden = !hasRows;
   if (!hasRows) return false;
 
-  const el = document.createElement('table');
-  const head = el.createTHead().insertRow();
+  // The column titles and every group are separate tables with equal fixed columns, so they
+  // line up. A group lives in its own block: its sticky title leaves together with its rows
+  // (sticky cells inside one table would all pile up under the column titles).
+  const addTable = (parent) => parent.appendChild(document.createElement('table'));
+  const titles = addTable(container);
+  titles.className = 'titles';
+  const head = titles.createTHead().insertRow();
   for (const title of table.columns) {
     const th = document.createElement('th');
     th.textContent = title;
     head.appendChild(th);
   }
-  const body = el.createTBody();
+  let body = addTable(container).createTBody();
   let stripe = 0;
   for (const row of table.rows) {
-    const tr = body.insertRow();
     if (row.group !== undefined) {
-      tr.className = 'group';
-      const td = tr.insertCell();
-      td.colSpan = table.columns.length;
-      td.textContent = row.group;
+      const group = container.appendChild(document.createElement('div'));
+      group.className = 'group';
+      const caption = group.appendChild(document.createElement('div'));
+      caption.className = 'group-title';
+      caption.textContent = row.group;
+      body = addTable(group).createTBody();
       stripe = 0;
       continue;
     }
+    const tr = body.insertRow();
     if (stripe++ % 2 === 1) tr.className = 'even';
     for (const text of row.cells || []) tr.insertCell().textContent = text;
     for (const badge of row.badges || []) {
@@ -66,7 +73,6 @@ function renderTable(container, table) {
       tr.lastElementChild.append(span);
     }
   }
-  container.appendChild(el);
 
   if (table.footer) {
     const footer = document.createElement('div');
@@ -77,7 +83,59 @@ function renderTable(container, table) {
   return true;
 }
 
+// facts: [{ label, value, tone? }] — the summary as short label/value lines.
+function renderFacts(container, facts) {
+  const list = facts || [];
+  container.hidden = list.length === 0;
+  container.replaceChildren(...list.flatMap((fact) => {
+    const label = document.createElement('dt');
+    label.textContent = fact.label;
+    const value = document.createElement('dd');
+    value.textContent = fact.value;
+    if (fact.tone) value.className = fact.tone;
+    return [label, value];
+  }));
+}
+
+// options: [{ name, label, checked, disabled?, nested? }]. The checkboxes are updated in place
+// when the list stays the same, so the one just clicked keeps the keyboard focus.
+function renderOptions(container, options) {
+  const list = options || [];
+  container.hidden = list.length === 0;
+  const names = (items) => items.map((o) => o.name).join('\n');
+  const inputs = () => [...container.querySelectorAll('input')];
+  if (names(inputs()) !== names(list)) {
+    container.replaceChildren(...list.map((o) => {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.name = o.name;
+      const text = document.createElement('span');
+      text.textContent = o.label;
+      label.append(input, text);
+      return label;
+    }));
+  }
+  inputs().forEach((input, i) => {
+    const o = list[i];
+    input.checked = !!o.checked;
+    input.disabled = !!o.disabled;
+    input.parentElement.className = ['option', o.nested && 'nested', o.disabled && 'disabled'].filter(Boolean).join(' ');
+  });
+}
+
+const confirmOptions = document.getElementById('confirm-options');
+const continueButton = document.querySelector('section[data-state="confirm"] button[data-action="continue"]');
+confirmOptions.addEventListener('change', () => {
+  const options = {};
+  for (const input of confirmOptions.querySelectorAll('input')) options[input.name] = input.checked;
+  // The plan on screen no longer matches the options; Continue waits for the new one.
+  continueButton.disabled = true;
+  window.shell.send({ action: 'options', options });
+});
+
 window.shell.onSetState((payload) => {
+  const entering = app.dataset.state !== payload.state;
   app.dataset.state = payload.state;
   // A started operation cannot be cancelled, so its window cannot be closed either.
   closeButton.disabled = payload.state === 'running';
@@ -91,9 +149,22 @@ window.shell.onSetState((payload) => {
     document.getElementById(payload.state + '-message').textContent = payload.message || '';
     document.getElementById(payload.state + '-detail').textContent = payload.detail || '';
     wide = renderTable(document.getElementById(payload.state + '-table'), payload.table);
+    if (payload.state === 'confirm') {
+      renderOptions(confirmOptions, payload.options);
+      const facts = document.getElementById('confirm-facts');
+      renderFacts(facts, payload.facts);
+      // Each block of the confirm gets a title; a block with nothing to show hides it too.
+      const tableTitle = document.getElementById('confirm-table-title');
+      tableTitle.textContent = payload.tableTitle || 'Preview';
+      tableTitle.hidden = !wide;
+      document.getElementById('confirm-options-title').hidden = confirmOptions.hidden;
+      document.getElementById('confirm-summary-title').hidden = facts.hidden && !payload.detail;
+      continueButton.disabled = payload.canContinue === false;
+    }
     // Enter acknowledges a message, but never starts an operation that cannot be undone.
+    // A confirm rebuilt after an option change leaves the focus where the user put it.
     const target = payload.state === 'confirm' ? 'button[data-action="cancel"]' : 'button.primary';
-    setTimeout(() => {
+    if (entering) setTimeout(() => {
       const btn = document.querySelector(`section.state[data-state="${payload.state}"] ${target}`);
       if (btn) btn.focus();
     }, 0);

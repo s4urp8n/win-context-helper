@@ -4,11 +4,19 @@ const MIN_HEIGHT = 180;
 const FALLBACK_MAX_HEIGHT = 800;
 const FALLBACK_MAX_WIDTH = 1000;
 
-// Hooks return either plain text or { message, detail, table }; only those fields reach the shell.
+// Hooks return either plain text or { message, detail, facts, table, tableTitle }; only those
+// fields reach the shell. `facts` are short { label, value, tone? } lines shown as a summary.
 function asBody(value, message) {
   if (typeof value === 'string') return { message, detail: value };
-  const { message: own, detail, table } = value || {};
-  return { message: own || message, detail, table };
+  const { message: own, detail, facts, table, tableTitle } = value || {};
+  return { message: own || message, detail, facts, table, tableTitle };
+}
+
+// A confirm body may also carry checkbox `options` ({ name, label, checked, disabled?,
+// nested? }) and `canContinue: false`, which disables Continue.
+function asConfirmBody(value, message) {
+  const { options, canContinue } = (typeof value === 'object' && value) || {};
+  return { ...asBody(value, message), options, canContinue: canContinue !== false };
 }
 
 function workAreaLimits() {
@@ -85,4 +93,4 @@ function makeShellController({ shellWindow, ipcMain }) {
   return { sendState, waitForAction, close, onReady };
 }
 
-module.exports = { makeShellController, asBody };
+module.exports = { makeShellController, asBody, asConfirmBody };

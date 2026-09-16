@@ -18,5 +18,8 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "koffi": "3.2.1"
   }
 }

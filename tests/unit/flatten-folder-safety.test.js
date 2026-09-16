@@ -2,7 +2,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const FlattenFolder = require('../../plugins/flatten-folder/plugin');
-const FlattenFolderKeepOrder = require('../../plugins/flatten-folder-keep-order/plugin');
+
+const FLAT = { keepHierarchy: false };
 
 function tree(root, layout) {
   for (const [rel, content] of Object.entries(layout)) {
@@ -52,6 +53,24 @@ describe('Flatten folder is all-or-nothing', () => {
     expect(snapshot(tmp)).toEqual(before);
   });
 
+  it('gives renamed root files their old names back when a later rename fails', async () => {
+    tree(tmp, { '0 a.txt': 'a', '0 b.txt': 'b', 'x/1.txt': '1' });
+    const before = snapshot(tmp);
+    const realRename = fs.renameSync;
+    const renamed = [];
+    let calls = 0;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (++calls === 3) throw busy();
+      renamed.push(path.basename(to));
+      return realRename(from, to);
+    });
+    const result = await new FlattenFolder().run({ targets: [tmp] });
+    expect(renamed).toEqual(['001 - x - 1.txt', '002 - 0 a.txt', '0 a.txt', '1.txt']);
+    expect(result).toMatchObject({ ok: false, processed: 0, moved: 2, notRestored: [] });
+    expect(result.errors).toEqual([{ folder: path.basename(tmp), file: '0 b.txt', message: 'The file is open in another program (EBUSY)' }]);
+    expect(snapshot(tmp)).toEqual(before);
+  });
+
   it('rolls back the folders that were already done when a later folder fails', async () => {
     const second = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-safe-second-'));
     try {
@@ -80,7 +99,7 @@ describe('Flatten folder is all-or-nothing', () => {
       if (calls >= 2) throw busy();
       return realRename(from, to);
     });
-    const result = await new FlattenFolderKeepOrder().run({ targets: [tmp] });
+    const result = await new FlattenFolder().run({ targets: [tmp] });
     expect(result).toMatchObject({ ok: false, processed: 1, moved: 1 });
     expect(result.notRestored).toEqual([{
       folder: path.basename(tmp),
@@ -97,6 +116,7 @@ describe('Flatten folder is all-or-nothing', () => {
     let created = false;
     const result = await new FlattenFolder().run({
       targets: [tmp],
+      options: FLAT,
       onProgress: () => {
         if (created) return;
         created = true;
@@ -114,6 +134,7 @@ describe('Flatten folder is all-or-nothing', () => {
     let created = false;
     const result = await new FlattenFolder().run({
       targets: [tmp],
+      options: FLAT,
       onProgress: () => {
         if (created) return;
         created = true;
@@ -131,6 +152,7 @@ describe('Flatten folder is all-or-nothing', () => {
     let linked = false;
     const result = await new FlattenFolder().run({
       targets: [tmp],
+      options: FLAT,
       onProgress: () => {
         if (linked) return;
         linked = true;
@@ -161,8 +183,8 @@ describe('Flatten folder is all-or-nothing', () => {
     const realLstat = fs.lstatSync;
     vi.spyOn(fs, 'lstatSync').mockImplementation((p, options) => (p === alias ? realLstat(tmp) : realLstat(p, options)));
     const pre = await new FlattenFolder().preflight({ targets: [tmp] });
-    expect(pre.folders[0].moves[0]).toMatchObject({ to: 'LONGFI~1 (2).TXT', renamed: true });
-    const result = await new FlattenFolder().run({ targets: [tmp] });
+    expect(pre.variants.flat.folders[0].moves[0]).toMatchObject({ to: 'LONGFI~1 (2).TXT', renamed: true });
+    const result = await new FlattenFolder().run({ targets: [tmp], options: FLAT });
     vi.restoreAllMocks();
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(path.join(tmp, 'LONGFI~1 (2).TXT'), 'utf8')).toBe('nested');
@@ -182,7 +204,7 @@ describe('Flatten folder is all-or-nothing', () => {
       }
       throw busy();
     });
-    const result = await new FlattenFolder().run({ targets: [tmp] });
+    const result = await new FlattenFolder().run({ targets: [tmp], options: FLAT });
     expect(result.notRestored).toEqual([{ folder: path.basename(tmp), file: path.join('a', '1.txt'), location: '1.txt', message: 'A file with this name already exists (EEXIST)' }]);
     expect(fs.readFileSync(path.join(tmp, 'a', '1.txt'), 'utf8')).toBe('intruder');
     expect(fs.readFileSync(path.join(tmp, '1.txt'), 'utf8')).toBe('1');
@@ -245,7 +267,7 @@ describe('Flatten folder is all-or-nothing', () => {
       if (moving) throw Object.assign(new Error('EACCES: permission denied, scandir'), { code: 'EACCES' });
       return realReaddir(...args);
     });
-    const result = await new FlattenFolder().run({ targets: [tmp], onProgress: () => { moving = true; } });
+    const result = await new FlattenFolder().run({ targets: [tmp], options: FLAT, onProgress: () => { moving = true; } });
     vi.restoreAllMocks();
     expect(result).toMatchObject({ ok: true, processed: 1, errors: [] });
     expect(fs.readFileSync(path.join(tmp, '1.txt'), 'utf8')).toBe('1');
@@ -263,9 +285,9 @@ describe('Flatten folder with overlapping selections', () => {
     const plugin = new FlattenFolder();
     const pre = await plugin.preflight({ targets });
     expect(pre.totalFiles).toBe(3);
-    expect(pre.folders.map((f) => f.basename)).toEqual(['A']);
+    expect(pre.variants.flat.folders.map((f) => f.basename)).toEqual(['A']);
     expect(pre.insideOthers).toEqual(['B']);
-    const result = await plugin.run({ targets });
+    const result = await plugin.run({ targets, options: FLAT });
     expect(result).toMatchObject({ ok: true, processed: 3 });
     expect(snapshot(path.join(tmp, 'A'))).toEqual(['1.txt=1', '2.txt=2', '3.txt=3']);
   });
@@ -276,7 +298,7 @@ describe('Flatten folder with overlapping selections', () => {
     const targets = [folder, `${folder.toUpperCase()}${path.sep}`];
     const pre = await new FlattenFolder().preflight({ targets });
     expect(pre).toMatchObject({ totalFiles: 1, insideOthers: [] });
-    const result = await new FlattenFolder().run({ targets });
+    const result = await new FlattenFolder().run({ targets, options: FLAT });
     expect(result).toMatchObject({ ok: true, processed: 1 });
     expect(snapshot(folder)).toEqual(['1.txt=1']);
   });
@@ -286,7 +308,7 @@ describe('Flatten folder with overlapping selections', () => {
     const targets = [path.join(tmp, 'Straße'), path.join(tmp, 'Strasse')];
     const pre = await new FlattenFolder().preflight({ targets });
     expect(pre).toMatchObject({ totalFiles: 2, insideOthers: [] });
-    const result = await new FlattenFolder().run({ targets });
+    const result = await new FlattenFolder().run({ targets, options: FLAT });
     expect(result).toMatchObject({ ok: true, processed: 2 });
     expect(snapshot(tmp)).toEqual(['Strasse/', 'Strasse/2.txt=2', 'Straße/', 'Straße/1.txt=1']);
   });
@@ -298,7 +320,7 @@ describe('Flatten folder with overlapping selections', () => {
     const targets = [path.join(tmp, 'A'), path.join(link, 'sub')];
     const pre = await new FlattenFolder().preflight({ targets });
     expect(pre).toMatchObject({ totalFiles: 1, insideOthers: ['sub'] });
-    const result = await new FlattenFolder().run({ targets });
+    const result = await new FlattenFolder().run({ targets, options: FLAT });
     expect(result).toMatchObject({ ok: true, processed: 1 });
     expect(snapshot(path.join(tmp, 'A'))).toEqual(['1.txt=1']);
   });
@@ -321,7 +343,7 @@ describe('Flatten folder with overlapping selections', () => {
       const folder = path.join(tmp, 'A');
       const pre = await new FlattenFolder().preflight({ targets: [folder, `${folder}${path.sep}`, path.join(folder, 'B')] });
       expect(pre).toMatchObject({ totalFiles: 2, insideOthers: ['B'] });
-      expect(pre.folders.map((f) => f.basename)).toEqual(['A']);
+      expect(pre.variants.tree.folders.map((f) => f.basename)).toEqual(['A']);
     });
 
     it('still recognizes a nested folder when an outer parent cannot be read', async () => {
@@ -336,7 +358,7 @@ describe('Flatten folder with overlapping selections', () => {
   it('flattens folders that only share the beginning of their names', async () => {
     tree(tmp, { 'A/x/1.txt': '1', 'AB/y/2.txt': '2' });
     const targets = [path.join(tmp, 'A'), path.join(tmp, 'AB')];
-    const result = await new FlattenFolder().run({ targets });
+    const result = await new FlattenFolder().run({ targets, options: FLAT });
     expect(result).toMatchObject({ ok: true, processed: 2 });
     expect(snapshot(tmp)).toEqual(['A/', 'A/1.txt=1', 'AB/', 'AB/2.txt=2']);
   });
@@ -349,11 +371,21 @@ describe('Flatten folder runs only the plan shown in the preview', () => {
 
   it('runs the plan that was previewed', async () => {
     tree(tmp, { 'a/1.txt': '1', 'b/c': null });
-    const plugin = new FlattenFolderKeepOrder();
-    const { planId } = await plugin.preflight({ targets: [tmp] });
+    const plugin = new FlattenFolder();
+    const { planId } = (await plugin.preflight({ targets: [tmp] })).variants.tree;
     const result = await plugin.run({ targets: [tmp], options: { planId } });
     expect(result).toMatchObject({ ok: true, processed: 1 });
     expect(snapshot(tmp)).toEqual(['a - 1.txt=1']);
+  });
+
+  it('moves nothing when the options differ from the previewed ones', async () => {
+    tree(tmp, { 'a/1.txt': '1' });
+    const plugin = new FlattenFolder();
+    const { planId } = (await plugin.preflight({ targets: [tmp] })).variants.tree;
+    const before = snapshot(tmp);
+    const result = await plugin.run({ targets: [tmp], options: { keepHierarchy: false, planId } });
+    expect(result).toMatchObject({ ok: false, stale: true, moved: 0 });
+    expect(snapshot(tmp)).toEqual(before);
   });
 
   it.each([
@@ -362,8 +394,8 @@ describe('Flatten folder runs only the plan shown in the preview', () => {
     ['a root file took a planned name', (dir) => tree(dir, { 'a - 1.txt': 'root' })],
   ])('moves nothing when %s after the preview', async (_, change) => {
     tree(tmp, { 'a/1.txt': '1' });
-    const plugin = new FlattenFolderKeepOrder();
-    const { planId } = await plugin.preflight({ targets: [tmp] });
+    const plugin = new FlattenFolder();
+    const { planId } = (await plugin.preflight({ targets: [tmp] })).variants.tree;
     change(tmp);
     const before = snapshot(tmp);
     const result = await plugin.run({ targets: [tmp], options: { planId } });
@@ -382,8 +414,7 @@ describe('Flatten folder removes empty subfolders', () => {
     const plugin = new FlattenFolder();
     const pre = await plugin.preflight({ targets: [tmp] });
     expect(pre.totalEmptyDirs).toBe(5);
-    expect(pre.folders[0].emptyDirCount).toBe(5);
-    await plugin.run({ targets: [tmp] });
+    await plugin.run({ targets: [tmp], options: FLAT });
     expect(snapshot(tmp)).toEqual(['1.txt=1', 'root.txt=r']);
   });
 

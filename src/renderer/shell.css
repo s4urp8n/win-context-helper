@@ -137,12 +137,13 @@ body {
 .message { font-size: 14px; font-weight: 600; line-height: 1.35; padding-top: 4px; }
 
 .detail {
-  margin: 12px 0 16px 0;
+  margin: 12px 0 0 0;
   padding: 0;
   font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: #333;
   flex: 0 1 auto;
   max-height: 400px;
@@ -161,11 +162,15 @@ body {
   min-height: 90px;
   max-height: 420px;
   overflow: auto;
-  margin: 0 0 12px 0;
+  margin: 0;
   border: 1px solid #dcdfe3;
   border-radius: 4px;
   background: #fff;
   user-select: text;
+}
+
+.detail + .table-wrap {
+  margin-top: 12px;
 }
 
 .table-wrap[hidden] {
@@ -186,10 +191,19 @@ body {
   line-height: 1.4;
 }
 
-.table-wrap th {
+.table-wrap {
+  --head-height: 30px;
+}
+
+.table-wrap table.titles {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+}
+
+.table-wrap th {
+  height: var(--head-height);
+  box-sizing: border-box;
   background: #eef1f5;
   color: #444;
   font-weight: 600;
@@ -198,10 +212,12 @@ body {
   border-bottom: 1px solid #dcdfe3;
 }
 
+/* File names keep every space ("Module 0.  Intro"). */
 .table-wrap td {
   padding: 5px 10px;
   vertical-align: top;
   color: #222;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -211,13 +227,30 @@ body {
 }
 
 .table-wrap tr.even td {
-  background: #e9eff7;
+  background: #f1f4f8;
 }
 
-.table-wrap tr.group td {
-  background: #e2eaf4;
-  color: #1d3f66;
-  font-weight: 600;
+/* One header per selected folder. It stays under the column titles while its rows scroll,
+   and looks nothing like a zebra row. */
+.table-wrap .group-title {
+  position: sticky;
+  top: var(--head-height);
+  z-index: 1;
+  padding: 8px 12px 8px 14px;
+  background: #3d6fa8;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  box-shadow: inset 4px 0 0 #1d4f88;
+}
+
+.table-wrap .group-title::before {
+  content: "📁 ";
+}
+
+.table-wrap .group + .group {
   border-top: 1px solid #cfdae8;
 }
 
@@ -246,7 +279,7 @@ body {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin-top: 16px;
 }
 
 button {
@@ -270,11 +303,118 @@ button.primary {
 
 button.primary:hover { background: #1864a8; }
 
+button:disabled,
+button.primary:disabled {
+  background: #e9ecef;
+  border-color: #d0d4d9;
+  color: #9aa0a6;
+  cursor: default;
+}
+
+/* Dialog options above the plan; changing one rebuilds the plan. */
+.options {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #dcdfe3;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.options[hidden] {
+  display: none;
+}
+
+.options .option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.options .option input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.options .option.disabled {
+  color: #9aa0a6;
+  cursor: default;
+}
+
+.options .option.disabled input {
+  cursor: default;
+}
+
+/* An option that only matters while the one above it is on. */
+.options .option.nested {
+  padding-left: 22px;
+}
+
 .buttons .note {
   margin-right: auto;
   align-self: center;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: #c92a2a;
+  color: #fff;
   font-size: 12px;
-  color: #8a5a00;
+  font-weight: 600;
+}
+
+/* Titles of the confirm blocks: Options, Summary, Preview. */
+.section-title {
+  flex: 0 0 auto;
+  margin: 14px 0 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5f6b7a;
+}
+
+.section-title[hidden] {
+  display: none;
+}
+
+/* The summary: one short line per fact, labels in the first column. */
+.facts {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.facts[hidden] {
+  display: none;
+}
+
+.facts dt {
+  color: #6b7280;
+}
+
+.facts dd {
+  margin: 0;
+  color: #222;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.facts dd.warn {
+  color: #c92a2a;
+  font-weight: 600;
+}
+
+/* Under its title a plain-text summary starts right away. */
+#confirm-detail {
+  margin-top: 0;
 }
 
 .spinner {

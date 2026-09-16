@@ -1,4 +1,4 @@
-const { makeShellController, asBody } = require('../../src/main/runners/shell-controller');
+const { makeShellController, asBody, asConfirmBody } = require('../../src/main/runners/shell-controller');
 
 function makeWindow() {
   const ipc = {};
@@ -126,14 +126,29 @@ describe('asBody', () => {
     expect(asBody('some text', 'Title')).toEqual({ message: 'Title', detail: 'some text' });
   });
 
-  it('keeps only message, detail and table of an object', () => {
+  it('keeps only the body fields of an object', () => {
     const table = { columns: ['A'], rows: [] };
-    expect(asBody({ message: 'Own', detail: 'd', table, state: 'form', uiHtml: '<b>' }, 'Title'))
-      .toEqual({ message: 'Own', detail: 'd', table });
+    const facts = [{ label: 'Files', value: '3 to move' }];
+    expect(asBody({ message: 'Own', detail: 'd', facts, table, tableTitle: 'Preview', state: 'form', uiHtml: '<b>' }, 'Title'))
+      .toStrictEqual({ message: 'Own', detail: 'd', facts, table, tableTitle: 'Preview' });
   });
 
   it('falls back to the given message', () => {
     expect(asBody({ detail: 'd' }, 'Title')).toEqual({ message: 'Title', detail: 'd' });
     expect(asBody(null, 'Title')).toEqual({ message: 'Title' });
+  });
+});
+
+describe('asConfirmBody', () => {
+  it('adds the dialog options and whether Continue is allowed', () => {
+    const options = [{ name: 'keep', label: 'Keep', checked: true }];
+    expect(asConfirmBody({ message: 'Go?', detail: 'd', options, canContinue: false, runOptions: { x: 1 } }, 'Title'))
+      .toEqual({ message: 'Go?', detail: 'd', table: undefined, options, canContinue: false });
+  });
+
+  it('allows Continue unless the body says otherwise', () => {
+    expect(asConfirmBody({ detail: 'd' }, 'Title')).toMatchObject({ message: 'Title', canContinue: true, options: undefined });
+    expect(asConfirmBody('text', 'Title')).toEqual({ message: 'Title', detail: 'text', options: undefined, canContinue: true });
+    expect(asConfirmBody(null, 'Title')).toMatchObject({ message: 'Title', canContinue: true });
   });
 });
